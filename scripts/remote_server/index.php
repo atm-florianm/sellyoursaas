@@ -3,7 +3,7 @@
  * Server agent for SellYourSaas
  * This script is called by a tiny web server and run as root.
  */
-
+chdir('/home/atm/dolibarr/htdocs/custom/sellyoursaas/scripts');
 $DEBUG = 1;
 
 $fh = fopen('/var/log/remote_server.log','a+');
