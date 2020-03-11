@@ -246,6 +246,9 @@ class SellYourSaasUtils
     	if ($delayindaysshort <= 0 || $delayindayshard <= 0)
     	{
     		$this->error='BadValueForDelayBeforeTrialEndForAlert';
+
+    		$conf->global->SYSLOG_FILE = $savlog;
+
     		return -1;
     	}
     	dol_syslog(__METHOD__." we send email warning on contract that will expire in ".$delayindaysshort." days or before and not yet reminded", LOG_DEBUG, 1);
@@ -287,6 +290,12 @@ class SellYourSaasUtils
     			{
     				if (! empty($contractprocessed[$obj->rowid])) continue;
 
+    				if ($nbsending >= $MAXPERCALL)
+    				{
+    				    dol_syslog("We reach the limit of ".$MAXPERCALL." contract processed per batch, so we quit loop for the batch doAlertSoftTrial to avoid to reach email quota.", LOG_WARNING);
+    				    break;
+    				}
+
     				// Test if this is a paid or not instance
     				$object = new Contrat($this->db);
     				$result = $object->fetch($obj->rowid);
@@ -325,60 +334,53 @@ class SellYourSaasUtils
     				if ($expirationdate && $expirationdate < $date_limit_expiration)
     				{
     					$nbsending++;
-    					if ($nbsending <= $MAXPERCALL)
+
+					    // Load third party
+					    $object->fetch_thirdparty();
+
+					    $outputlangs = new Translate('', $conf);
+					    $outputlangs->setDefaultLang($object->thirdparty->default_lang);
+					    $outputlangs->loadLangs(array('main'));
+
+					    // @TODO Save in cache $arraydefaultmessage for each $object->thirdparty->default_lang and reuse it to avoid getEMailTemplate called each time
+					    dol_syslog("We will call getEMailTemplate for type 'contract', label 'GentleTrialExpiringReminder', outputlangs->defaultlang=".$outputlangs->defaultlang);
+					    $arraydefaultmessage=$formmail->getEMailTemplate($this->db, 'contract', $user, $outputlangs, 0, 1, 'GentleTrialExpiringReminder');
+
+    					$substitutionarray=getCommonSubstitutionArray($outputlangs, 0, null, $object);
+    					$substitutionarray['__SELLYOURSAAS_EXPIRY_DATE__']=dol_print_date($expirationdate, 'day', 'tzserver', $outputlangs);
+    					complete_substitutions_array($substitutionarray, $outputlangs, $object);
+
+    					$subject = make_substitutions($arraydefaultmessage->topic, $substitutionarray);
+    					$msg     = make_substitutions($arraydefaultmessage->content, $substitutionarray);
+
+    					$from = $conf->global->SELLYOURSAAS_NOREPLY_EMAIL;
+    					$to = $object->thirdparty->email;
+    					$trackid = 'thi'.$object->thirdparty->id;
+
+    					$cmail = new CMailFile($subject, $to, $from, $msg, array(), array(), array(), '', '', 0, 1, '', '', $trackid);
+    					$result = $cmail->sendfile();
+    					if (! $result)
     					{
-    					    // Load third party
-    					    $object->fetch_thirdparty();
-
-    					    $outputlangs = new Translate('', $conf);
-    					    $outputlangs->setDefaultLang($object->thirdparty->default_lang);
-    					    $outputlangs->loadLangs(array('main'));
-
-    					    // @TODO Save in cache $arraydefaultmessage for each $object->thirdparty->default_lang and reuse it to avoid getEMailTemplate called each time
-    					    dol_syslog("We will call getEMailTemplate for type 'contract', label 'GentleTrialExpiringReminder', outputlangs->defaultlang=".$outputlangs->defaultlang);
-    					    $arraydefaultmessage=$formmail->getEMailTemplate($this->db, 'contract', $user, $outputlangs, 0, 1, 'GentleTrialExpiringReminder');
-
-	    					$substitutionarray=getCommonSubstitutionArray($outputlangs, 0, null, $object);
-	    					$substitutionarray['__SELLYOURSAAS_EXPIRY_DATE__']=dol_print_date($expirationdate, 'day', 'tzserver', $outputlangs);
-	    					complete_substitutions_array($substitutionarray, $outputlangs, $object);
-
-	    					$subject = make_substitutions($arraydefaultmessage->topic, $substitutionarray);
-	    					$msg     = make_substitutions($arraydefaultmessage->content, $substitutionarray);
-
-	    					$from = $conf->global->SELLYOURSAAS_NOREPLY_EMAIL;
-	    					$to = $object->thirdparty->email;
-	    					$trackid = 'thi'.$object->thirdparty->id;
-
-	    					$cmail = new CMailFile($subject, $to, $from, $msg, array(), array(), array(), '', '', 0, 1, '', '', $trackid);
-	    					$result = $cmail->sendfile();
-	    					if (! $result)
-	    					{
-	    						$error++;
-	    						$this->error = $cmail->error;
-	    						$this->errors = $cmail->errors;
-	    						dol_syslog("Failed to send email to ".$to." ".$this->error, LOG_WARNING);
-	    						$contractko[$object->id]=$object->ref;
-	    					}
-	    					else
-	    					{
-	    						dol_syslog("Email sent to ".$to, LOG_DEBUG);
-	    						$contractok[$object->id]=$object->ref;
-
-	    						$sqlupdatedate = 'UPDATE '.MAIN_DB_PREFIX."contrat_extrafields SET date_softalert_endfreeperiod = '".$this->db->idate($now)."' WHERE fk_object = ".$object->id;
-	    						$resqlupdatedate = $this->db->query($sqlupdatedate);
-	    						if (! $resqlupdatedate)
-	    						{
-	    						    dol_syslog("Failed to update date_softalert_endfreeperiod with '".$this->db->idate($now)."' for object id = ".$object->id, LOG_ERR);
-	    						}
-	    					}
-
-	    					$contractprocessed[$object->id]=$object->ref;
+    						$error++;
+    						$this->error = $cmail->error;
+    						$this->errors = $cmail->errors;
+    						dol_syslog("Failed to send email to ".$to." ".$this->error, LOG_WARNING);
+    						$contractko[$object->id]=$object->ref;
     					}
     					else
     					{
-    					    dol_syslog("We reach the limit of ".$MAXPERCALL." contract processed per batch, so we quit loop for the batch doAlertSoftTrial to avoid to reach email quota.", LOG_WARNING);
-    					    break;
+    						dol_syslog("Email sent to ".$to, LOG_DEBUG);
+    						$contractok[$object->id]=$object->ref;
+
+    						$sqlupdatedate = 'UPDATE '.MAIN_DB_PREFIX."contrat_extrafields SET date_softalert_endfreeperiod = '".$this->db->idate($now)."' WHERE fk_object = ".$object->id;
+    						$resqlupdatedate = $this->db->query($sqlupdatedate);
+    						if (! $resqlupdatedate)
+    						{
+    						    dol_syslog("Failed to update date_softalert_endfreeperiod with '".$this->db->idate($now)."' for object id = ".$object->id, LOG_ERR);
+    						}
     					}
+
+    					$contractprocessed[$object->id]=$object->ref;
     				}
     				else
     				{
@@ -448,6 +450,9 @@ class SellYourSaasUtils
     	{
     		$this->error = 'Bad value for parameter day1 and day2. Set param to "1, 20" for example';
     		$error++;
+
+    		$conf->global->SYSLOG_FILE = $savlog;
+
     		return 1;
     	}
 
@@ -470,6 +475,9 @@ class SellYourSaasUtils
 
     	if ($currentday != $day1 && $currentday != $day2) {
     		$this->output = 'Nothing to do. We are not the day '.$day1.', neither the day '.$day2.' of the month';
+
+    		$conf->global->SYSLOG_FILE = $savlog;
+
     		return 0;
     	}
 
@@ -602,6 +610,9 @@ class SellYourSaasUtils
     	{
     		$this->error = 'Bad value for parameter day1 and day2. Set param to "1, 20" for example';
     		$error++;
+
+    		$conf->global->SYSLOG_FILE = $savlog;
+
     		return 1;
     	}
 
@@ -624,6 +635,9 @@ class SellYourSaasUtils
 
     	if ($currentday != $day1 && $currentday != $day2) {
     		$this->output = 'Nothing to do. We are not the day '.$day1.', neither the day '.$day2.' of the month';
+
+    		$conf->global->SYSLOG_FILE = $savlog;
+
     		return 0;
     	}
 
@@ -731,9 +745,10 @@ class SellYourSaasUtils
      * Loop on invoice for customer with default payment mode Stripe and take payment/send email. Unsuspend if it was suspended (done by trigger BILL_CANCEL or BILL_PAYED).
      * CAN BE A CRON TASK
      *
-     * @return	int			0 if OK, <>0 if KO (this function is used also by cron so only 0 is OK)
+     * @param	int		    $maxnbofinvoicetotry      Max number of payment to do (0 = No max)
+     * @return	int			                         0 if OK, <>0 if KO (this function is used also by cron so only 0 is OK)
      */
-    public function doTakePaymentStripe()
+     public function doTakePaymentStripe($maxnbofinvoicetotry = 0)
     {
     	global $conf, $langs, $mysoc;
 
@@ -756,6 +771,9 @@ class SellYourSaasUtils
     	if (empty($conf->stripe->enabled))
     	{
     		$this->error='Error, stripe module not enabled';
+
+    		$conf->global->SYSLOG_FILE = $savlog;
+
     		return 1;
     	}
 
@@ -824,6 +842,10 @@ class SellYourSaasUtils
     			}
 
     			$i++;
+
+    			if ($maxnbofinvoicetotry && $i >= $maxnbofinvoicetotry) {
+    			    break;
+    			}
     		}
     	}
     	else
@@ -847,17 +869,18 @@ class SellYourSaasUtils
      * doTakePaymentStripeForThirdparty
      * Take payment/send email. Unsuspend if it was suspended (done by trigger BILL_CANCEL or BILL_PAYED).
      *
-     * @param	int		$service					'StripeTest' or 'StripeLive'
-     * @param	int		$servicestatus				Service 0 or 1
-     * @param	int		$thirdparty_id				Thirdparty id
-     * @param	int		$companypaymentmode			Company payment mode id
-     * @param	int		$invoice					null=All invoices of thirdparty, Invoice=Only this invoice
-     * @param	int		$includedraft				Include draft invoices
-     * @param	int		$noemailtocustomeriferror	1=No email sent to customer if there is a payment error (can be used when error is already reported on screen)
-     * @param	int		$nocancelifpaymenterror		1=Do not cancel payment if there is a recent payment error AC_PAYMENT_STRIPE_KO (used to charge from user console)
-     * @return	int									0 if no error, >0 if error
+     * @param	int		             $service					'StripeTest' or 'StripeLive'
+     * @param	int		             $servicestatus				Service 0 or 1
+     * @param	int		             $thirdparty_id				Thirdparty id
+     * @param	CompanyPaymentMode	 $companypaymentmode		Company payment mode id
+     * @param	int		             $invoice					null=All invoices of thirdparty, Invoice=Only this invoice
+     * @param	int		             $includedraft				Include draft invoices
+     * @param	int		             $noemailtocustomeriferror	1=No email sent to customer if there is a payment error (can be used when error is already reported on screen)
+     * @param	int		             $nocancelifpaymenterror	1=Do not cancel payment if there is a recent payment error AC_PAYMENT_STRIPE_KO (used to charge from user console)
+     * @param   int                  $calledinmyaccountcontext  1=The payment is called in a myaccount GUI context. So we can ignore control on delayed payments.
+     * @return	int					                 			0 if no error, >0 if error
      */
-    function doTakePaymentStripeForThirdparty($service, $servicestatus, $thirdparty_id, $companypaymentmode, $invoice=null, $includedraft=0, $noemailtocustomeriferror=0, $nocancelifpaymenterror=0)
+    function doTakePaymentStripeForThirdparty($service, $servicestatus, $thirdparty_id, $companypaymentmode, $invoice=null, $includedraft=0, $noemailtocustomeriferror=0, $nocancelifpaymenterror=0, $calledinmyaccountcontext=0)
     {
     	global $conf, $mysoc, $user, $langs;
 
@@ -865,7 +888,7 @@ class SellYourSaasUtils
 
     	$langs->load("agenda");
 
-    	dol_syslog("doTakePaymentStripeForThirdparty service=".$service." servicestatus=".$servicestatus." thirdparty_id=".$thirdparty_id);
+    	dol_syslog("doTakePaymentStripeForThirdparty service=".$service." servicestatus=".$servicestatus." thirdparty_id=".$thirdparty_id." companypaymentmode=".$companypaymentmode->id);
 
     	$this->stripechargedone = 0;
     	$this->stripechargeerror = 0;
@@ -960,7 +983,7 @@ class SellYourSaasUtils
 
 			$invoice->fetch_thirdparty();
 
-			dol_syslog("--- Process invoice thirdparty_id=".$thirdparty_id.", thirdparty_name=".$invoice->thirdparty->name." id=".$invoice->id.", ref=".$invoice->ref.", datef=".dol_print_date($invoice->date, 'dayhour'), LOG_DEBUG);
+			dol_syslog("--- Process invoice thirdparty_id=".$thirdparty_id.", thirdparty_name=".$invoice->thirdparty->name." id=".$invoice->id.", ref=".$invoice->ref.", datef=".dol_print_date($invoice->date, 'dayhourlog'), LOG_DEBUG);
 
 			$alreadypayed = $invoice->getSommePaiement();
     		$amount_credit_notes_included = $invoice->getSumCreditNotesUsed();
@@ -989,29 +1012,40 @@ class SellYourSaasUtils
     				dol_syslog("Current Stripe environment is ".$stripearrayofkeysbyenv[$servicestatus]['publishable_key']);
     				dol_syslog("Current Saved Stripe environment is ".$savstripearrayofkeysbyenv[$servicestatus]['publishable_key']);
 
+    				$foundalternativestripeaccount = '';
+
     				// Force stripe to another value (by default this value is empty)
     				if (! empty($thirdparty->array_options['options_stripeaccount']))
     				{
     				    dol_syslog("The thirdparty id=".$thirdparty->id." has a dedicated Stripe Account, so we switch to it.");
-    				    $tmparray = explode(':', $thirdparty->array_options['options_stripeaccount']);
-    				    if (! empty($tmparray[3]))
-    				    {
-    				        $stripearrayofkeysbyenv = array(
-        				        0=>array(
-        				            "publishable_key" => $tmparray[0],
-        				            "secret_key"      => $tmparray[1]
-        				        ),
-        				        1=>array(
-        				            "publishable_key" => $tmparray[2],
-        				            "secret_key"      => $tmparray[3]
-        				        )
-        				    );
 
-       				        $stripearrayofkeys = $stripearrayofkeysbyenv[$servicestatus];
-        				    \Stripe\Stripe::setApiKey($stripearrayofkeys['secret_key']);
-        				    dol_syslog("We use now ".$stripearrayofkeys['publishable_key'], LOG_DEBUG);
+    				    $tmparray = explode('@', $thirdparty->array_options['options_stripeaccount']);
+    				    if (! empty($tmparray[1]))
+    				    {
+        				    $tmparray2 = explode(':', $tmparray[1]);
+        				    if (! empty($tmparray2[3]))
+        				    {
+        				        $stripearrayofkeysbyenv = array(
+            				        0=>array(
+            				            "publishable_key" => $tmparray2[0],
+            				            "secret_key"      => $tmparray2[1]
+            				        ),
+            				        1=>array(
+            				            "publishable_key" => $tmparray2[2],
+            				            "secret_key"      => $tmparray2[3]
+            				        )
+            				    );
+
+           				        $stripearrayofkeys = $stripearrayofkeysbyenv[$servicestatus];
+            				    \Stripe\Stripe::setApiKey($stripearrayofkeys['secret_key']);
+
+            				    $foundalternativestripeaccount = $tmparray[0];    // Store the customer id
+
+            				    dol_syslog("We use now customer=".$foundalternativestripeaccount." publishable_key=".$stripearrayofkeys['publishable_key'], LOG_DEBUG);
+        				    }
     				    }
-    				    else
+
+    				    if (! $foundalternativestripeaccount)
     				    {
     				        $stripearrayofkeysbyenv = $savstripearrayofkeysbyenv;
 
@@ -1030,11 +1064,19 @@ class SellYourSaasUtils
 
     				$stripeacc = $stripe->getStripeAccount($service);								// Get Stripe OAuth connect account if it exists (no network access here)
 
-    				$customer = $stripe->customerStripe($thirdparty, $stripeacc, $servicestatus, 0);
-    				if (empty($customer) && ! empty($stripe->error))
-					{
-						$this->errors[] = $stripe->error;
-					}
+    				if ($foundalternativestripeaccount) {
+    				    if (empty($stripeacc)) {				// If the Stripe connect account not set, we use common API usage
+    				        $customer = \Stripe\Customer::retrieve("$foundalternativestripeaccount");
+    				    } else {
+    				        $customer = \Stripe\Customer::retrieve("$foundalternativestripeaccount", array("stripe_account" => $stripeacc));
+    				    }
+    				} else {
+        				$customer = $stripe->customerStripe($thirdparty, $stripeacc, $servicestatus, 0);
+        				if (empty($customer) && ! empty($stripe->error))
+    					{
+    						$this->errors[] = $stripe->error;
+    					}
+    				}
 
     				$nbhoursbetweentries    = (empty($conf->global->SELLYOURSAAS_NBHOURSBETWEENTRIES) ? 49 : $conf->global->SELLYOURSAAS_NBHOURSBETWEENTRIES);				// Must have more that 48 hours + 1 between each try (so 1 try every 3 daily batch)
     				$nbdaysbeforeendoftries = (empty($conf->global->SELLYOURSAAS_NBDAYSBEFOREENDOFTRIES) ? 35 : $conf->global->SELLYOURSAAS_NBDAYSBEFOREENDOFTRIES);
@@ -1059,8 +1101,8 @@ class SellYourSaasUtils
 							$errorforinvoice++;
 							$this->errors[]=$errmsg;
 						}
-						elseif (! empty($invoice->array_options['options_delayautopayment']) && $invoice->array_options['options_delayautopayment'] > $now) {
-						    $errmsg='Payment try was canceled (invoice is qualified by the automatic payment was delayed after the '.dol_print_date($invoice->array_options['options_delayautopayment'], 'day').')';
+						elseif (! empty($invoice->array_options['options_delayautopayment']) && $invoice->array_options['options_delayautopayment'] > $now && empty($calledinmyaccountcontext)) {
+						    $errmsg='Payment try was canceled (invoice qualified by the automatic payment was delayed after the '.dol_print_date($invoice->array_options['options_delayautopayment'], 'day').')';
 						    dol_syslog($errmsg, LOG_DEBUG);
 
 						    $error++;
@@ -1092,7 +1134,7 @@ class SellYourSaasUtils
 	    						$stripefailuremessage='';
 	    						$stripefailuredeclinecode='';
 
-	    						if (empty($conf->global->STRIPE_USE_INTENT_WITH_AUTOMATIC_CONFIRMATION)) // Using old method
+	    						if (preg_match('/^card_/', $stripecard->id)) // Using old method
 	    						{
     	    						dol_syslog("* Create charge on card ".$stripecard->id.", amountstripe=".$amountstripe.", FULLTAG=".$FULLTAG, LOG_DEBUG);
 
@@ -1164,7 +1206,7 @@ class SellYourSaasUtils
 
 	    							$error++;
 	    							$errorforinvoice++;
-	    							$errmsg='Failed to charge card ('.$stripearrayofkeys['publishable_key'].')';
+	    							$errmsg=$langs->trans("FailedtoChargeCard");
 	    							if (! empty($charge))
 	    							{
 	    							    if ($stripefailuredeclinecode == 'authentication_required')
@@ -1172,7 +1214,7 @@ class SellYourSaasUtils
 	    							        $errauthenticationmessage=$langs->trans("ErrSCAAuthentication");
 	    							        $errmsg=$errauthenticationmessage;
 	    							    }
-	    							    elseif ($stripefailuredeclinecode == 'insufficient_funds')
+	    							    elseif (in_array($stripefailuredeclinecode, array('insufficient_funds', 'generic_decline')))
 	    							    {
 	    							        $errmsg.=': '.$charge->failure_code;
 	    							        $errmsg.=($charge->failure_message?' - ':'').' '.$charge->failure_message;
@@ -1194,7 +1236,7 @@ class SellYourSaasUtils
 	    							}
 
 	    							$description='Stripe payment ERROR from doTakePaymentStripeForThirdparty: '.$FULLTAG;
-	    							$postactionmessages[]=$errmsg;
+	    							$postactionmessages[]=$errmsg.' ('.$stripearrayofkeys['publishable_key'].')';
 	    							$this->errors[]=$errmsg;
 	    						}
 	    						else
@@ -1260,9 +1302,10 @@ class SellYourSaasUtils
 
 	    							if (! $errorforinvoice)
 	    							{
-	    								dol_syslog('* Record payment for invoice id '.$invoice->id);
+	    								dol_syslog('* Record payment for invoice id '.$invoice->id.'. It includes closing of invoice and regenerating document');
 
-	    								$paiement_id = $paiement->create($user, 1);    // This include closing invoices to 'paid' (and trigger including unsuspending) and regenerating documents
+	    								// This include closing invoices to 'paid' (and trigger including unsuspending) and regenerating document
+	    								$paiement_id = $paiement->create($user, 1);
 	    								if ($paiement_id < 0)
 	    								{
 	    								    $postactionmessages[] = $paiement->error.($paiement->error?' ':'').join("<br>\n", $paiement->errors);
@@ -1690,7 +1733,7 @@ class SellYourSaasUtils
     				// Test if there is pending invoice
     				$object->fetchObjectLinked();
 
-    				dol_syslog('Search if there is at least on open invoice', LOG_DEBUG);
+    				dol_syslog('Search if there is at least one open invoice', LOG_DEBUG);
     				if (is_array($object->linkedObjects['facture']) && count($object->linkedObjects['facture']) > 0)
     				{
     					usort($object->linkedObjects['facture'], "cmp");
@@ -1716,7 +1759,7 @@ class SellYourSaasUtils
 
     				if ($expirationdate && $expirationdate < $enddatetoscan)
     				{
-    				    dol_syslog("Define the newdate of end of services from expirationdate=".$expirationdate);
+    				    dol_syslog("Define the newdate of end of services from expirationdate=".$expirationdate.' ('.dol_print_date($expirationdate, 'dayhourlog').')');
     				    $newdate = $expirationdate;
     					$protecti=0;	//$protecti is to avoid infinite loop
     					while ($newdate < $enddatetoscan && $protecti < 1000)
@@ -1728,7 +1771,7 @@ class SellYourSaasUtils
     					if ($protecti < 1000)	// If not, there is a pb
     					{
     						// We will update the end of date of contrat, so first we refresh contract data
-    						dol_syslog("We update qty of resources by a remote action refresh.");
+    					    dol_syslog("We update qty of resources by a remote action refresh on ".$object->ref);
 
     						$this->db->begin();
 
@@ -2085,8 +2128,7 @@ class SellYourSaasUtils
     		return -1;
     	}
 
-    	$langs->load("sellyoursaas");
-    	$langs->load("agenda");
+    	$langs->loadLangs(array("sellyoursaas", "agenda"));
 
     	$error = 0;
     	$erroremail = '';
@@ -2134,10 +2176,15 @@ class SellYourSaasUtils
     		    $ifetchservice++;
 
 				$obj = $this->db->fetch_object($resql);
-
 				if ($obj)
 				{
 					if (! empty($contractprocessed[$obj->rowid])) continue;
+
+					if ($somethingdoneoncontract >= $MAXPERCALL)
+					{
+					    dol_syslog("We reach the limit of ".$MAXPERCALL." contract processed, so we quit loop for this batch doSuspendInstances to avoid to reach email quota.", LOG_WARNING);
+					    break;
+					}
 
 					// Test if this is a paid or not instance
 					$object = new Contrat($this->db);
@@ -2176,11 +2223,6 @@ class SellYourSaasUtils
 
 					if ($expirationdate && $expirationdate < $now)	// If contract expired (we already had a test into main select, this is a security)
 					{
-					    if ($somethingdoneoncontract >= $MAXPERCALL)
-					    {
-					        dol_syslog("We reach the limit of ".$MAXPERCALL." contract processed, so we quit loop for this batch doSuspendInstances to avoid to reach email quota.", LOG_WARNING);
-                            break;
-					    }
 					    $somethingdoneoncontract++;
 
 						$wemustsuspendinstance = false;
@@ -2272,7 +2314,8 @@ class SellYourSaasUtils
 									$idinvoice = $invoice_draft->create($user);      // This include class to add_object_linked() and add add_contact()
 									if (! ($idinvoice > 0))
 									{
-										$this->errors[] = $invoice_draft->error;
+									    if ($invoice_draft->error) $this->errors[] = $invoice_draft->error;
+									    else $this->errors[] = 'Error creating draft invoice';
 										$error++;
 									}
 								}
@@ -2451,14 +2494,15 @@ class SellYourSaasUtils
 										if (! $error && $result < 0)
 										{
 											$error++;
-											$this->errors[] = $db->lasterror();
+											$this->errors[] = 'Error sql '.$db->lasterror();
 										}
 
 										$result=$oldinvoice->delete($user, 1);
 										if (! $error && $result < 0)
 										{
 											$error++;
-											$this->errors[] = $oldinvoice->error;
+											if ($oldinvoice->error) $this->errors[] = $oldinvoice->error;
+											else $this->errors[] = 'Error deleting invoice';
 										}
 
 										if (! $error)
@@ -2469,7 +2513,8 @@ class SellYourSaasUtils
 									else
 									{
 										$error++;
-										$this->errors[] = $invoice_rec->error;
+										if ($invoice_rec->error) $this->errors[] = $invoice_rec->error;
+										else $this->errors[] = 'Error creating recurring invoice';
 									}
 								}
 							}
@@ -2490,7 +2535,10 @@ class SellYourSaasUtils
 							{
 								$error++;
 								$this->error = $object->error;
-								$this->errors = array_merge((array) $this->errors, (array) $object->errors);
+								if (is_array($object->errors) && count($object->errors)) {
+								    if (is_array($this->errors)) $this->errors = array_merge($this->errors, $object->errors);
+								    else $this->errors = $object->errors;
+								}
 							}
 							else
 							{
@@ -2570,15 +2618,17 @@ class SellYourSaasUtils
    		if (! $error)
    		{
    			$this->db->commit();
-   			$this->output = $numofexpiredcontractlines.' expired contract lines found';
-   			$this->output.= ' - '.count($contractprocessed).' '.$mode.' running contract(s) with service end date before '.dol_print_date($datetotest, 'dayhourrfc').' suspended'.(count($contractprocessed)>0 ? ' : '.join(',', $contractprocessed) : '').' (search done on contracts of SellYourSaas customers only)';
+   			$this->output = $numofexpiredcontractlines.' expired contract lines found'."\n";
+   			$this->output.= count($contractprocessed).' '.$mode.' running contract(s) with service end date before '.dol_print_date($datetotest, 'dayhourrfc').' suspended'.(count($contractprocessed)>0 ? ' : '.join(',', $contractprocessed) : '').' (search done on contracts of SellYourSaas customers only)';
    			$this->output.= '. '.count($contractconvertedintemplateinvoice).' '.$mode.' running contract(s) with service end date before '.dol_print_date($datetotest, 'dayhourrfc').' converted into template invoice'.(count($contractconvertedintemplateinvoice)>0 ? ' : '.join(',', $contractconvertedintemplateinvoice) : '');
    			if ($erroremail) $this->output.='. Got errors when sending some email : '.$erroremail;
    		}
    		else
    		{
    			$this->db->rollback();
-   			$this->output = count($contractprocessed).' '.$mode.' running contract(s) with service end date before '.dol_print_date($datetotest, 'dayhourrfc').' to suspend'.(count($contractprocessed)>0 ? ' : '.join(',', $contractprocessed) : '').' (search done on contracts of SellYourSaas customers only)';
+   			$this->output = "Rollback after error\n";
+   			$this->output.= $numofexpiredcontractlines.' expired contract lines found'."\n";
+   			$this->output.= count($contractprocessed).' '.$mode.' running contract(s) with service end date before '.dol_print_date($datetotest, 'dayhourrfc').' to suspend'.(count($contractprocessed)>0 ? ' : '.join(',', $contractprocessed) : '').' (search done on contracts of SellYourSaas customers only)';
    			$this->output.='. '.count($contractconvertedintemplateinvoice).' '.$mode.' running contract(s) with service end date before '.dol_print_date($datetotest, 'dayhourrfc').' to convert into template invoice'.(count($contractconvertedintemplateinvoice)>0 ? ' : '.join(',', $contractconvertedintemplateinvoice) : '');
    			if ($erroremail) $this->output.='. Got errors when sending some email : '.$erroremail;
    		}
@@ -2674,8 +2724,6 @@ class SellYourSaasUtils
     	$now = dol_now();
     	$datetotest = dol_time_plus_duree($now, -1 * abs($delayindays), 'd');
 
-    	$this->db->begin();
-
     	$sql = 'SELECT c.rowid, c.ref_customer, s.client, cd.rowid as lid';
     	$sql.= ' FROM '.MAIN_DB_PREFIX.'contrat as c, '.MAIN_DB_PREFIX.'contratdet as cd, '.MAIN_DB_PREFIX.'contrat_extrafields as ce, ';
     	$sql.= ' '.MAIN_DB_PREFIX.'societe as s, '.MAIN_DB_PREFIX.'societe_extrafields as se';
@@ -2687,7 +2735,7 @@ class SellYourSaasUtils
     	$sql.= " AND se.fk_object = s.rowid";
     	$sql.= " AND se.dolicloud = 'yesv2'";
     	$sql.= $this->db->order('s.client,c.rowid','ASC,ASC');
-    	$sql.= $this->db->plimit(1000);	// To avoid too long answers. There is another limit on number of case undeployed to MAXPERCALL later
+    	$sql.= $this->db->plimit(1000);	// To avoid too long answers. There is another limit on number of case really undeployed to MAXPERCALL later
 
     	$resql = $this->db->query($sql);
     	if ($resql)
@@ -2705,6 +2753,12 @@ class SellYourSaasUtils
     			{
     				if (! empty($contractprocessed[$obj->rowid])) continue;
 
+    				if ($somethingdoneoncontract >= $MAXPERCALL)
+    				{
+    				    dol_syslog("We reach the limit of ".$MAXPERCALL." contract processed, so we quit loop for this batch doUndeployOldSuspendedInstances to avoid a too long process.", LOG_WARNING);
+    				    break;
+    				}
+
     				// Test if this is a paid or not instance
     				$object = new Contrat($this->db);
     				$object->fetch($obj->rowid);
@@ -2721,19 +2775,17 @@ class SellYourSaasUtils
     				if ($mode == 'paid' && ! $isAPayingContract) continue;			// Discard if this is a test instance when we are in paid mode
 
     				// Undeploy now
-    				if ($somethingdoneoncontract >= $MAXPERCALL)
-    				{
-    				    dol_syslog("We reach the limit of ".$MAXPERCALL." contract processed, so we quit loop for this batch doUndeployOldSuspendedInstances to avoid a too long process.", LOG_WARNING);
-    				    break;
-    				}
-    				$somethingdoneoncontract++;
+    				$this->db->begin();
 
-    				// Undeploy instance
     				$tmparray = sellyoursaasGetExpirationDate($object);
     				$expirationdate = $tmparray['expirationdate'];
 
-    				if ($expirationdate && $expirationdate < ($now - (abs($delayindays)*24*3600)))
+    				$remotetouse = '';
+    				if ($expirationdate && $expirationdate < $datetotest)
     				{
+    				    $somethingdoneoncontract++;
+
+    				    // Undeploy instance
     				    $remotetouse = 'undeploy';
     				    if ($mode == 'test') $remotetouse = 'undeployall';
 
@@ -2750,82 +2802,156 @@ class SellYourSaasUtils
     					//$object->array_options['options_deployment_status'] = 'suspended';
 
     					$contractprocessed[$object->id]=$object->ref;	// To avoid to make action twice on same contract
-    				}
 
-    				// Finish undeploy
+        				// Finish undeploy
 
-    				// Unactivate all lines
-    				if (! $error)
-    				{
-    					dol_syslog("Unactivate all lines - doUndeployOldSuspendedInstances undeploy or undeployall");
+        				// Unactivate all lines
+        				if (! $error)
+        				{
+        					dol_syslog("Unactivate all lines - doUndeployOldSuspendedInstances undeploy or undeployall");
 
-    					$conf->global->noapachereload = 1;       // Set a global variable that can be read later by trigger
-    					$comment = "Close after undeployment by doUndeployOldSuspendedInstances('".$mode."') the ".dol_print_date($now, 'dayhourrfc').' (noapachereload='.$conf->global->noapachereload.')';
-    					$result = $object->closeAll($user, 1, $comment);
-    					$conf->global->noapachereload = null;    // unset a global variable that can be read later by trigger
-    					if ($result <= 0)
-    					{
-    						$error++;
-    						$this->error=$object->error;
-    						$this->errors = array_merge((array) $this->errors, (array) $object->errors);
-    					}
-    				}
+        					$conf->global->noapachereload = 1;       // Set a global variable that can be read later by trigger
+        					$comment = "Close after undeployment by doUndeployOldSuspendedInstances('".$mode."') the ".dol_print_date($now, 'dayhourrfc').' (noapachereload='.$conf->global->noapachereload.')';
+        					$result = $object->closeAll($user, 1, $comment);   // Disable trigger to avoid any other action
+        					$conf->global->noapachereload = null;    // unset a global variable that can be read later by trigger
+        					if ($result <= 0)
+        					{
+        						$error++;
+        						$this->error=$object->error;
+        						$this->errors = array_merge((array) $this->errors, (array) $object->errors);
+        					}
+        				}
 
-    				// End of undeployment is now OK / Complete
-    				if (! $error)
-    				{
-    					$object->array_options['options_deployment_status'] = 'undeployed';
-    					$object->array_options['options_undeployment_date'] = dol_now();
-    					$object->array_options['options_undeployment_ip'] = $_SERVER['REMOTE_ADDR'];
+        				// End of undeployment is now OK / Complete
+        				if (! $error)
+        				{
+        					$object->array_options['options_deployment_status'] = 'undeployed';
+        					$object->array_options['options_undeployment_date'] = dol_now();
+        					$object->array_options['options_undeployment_ip'] = getUserRemoteIP();
 
-    					$result = $object->update($user);
-    					if ($result < 0)
-    					{
-    						// We ignore errors. This should not happen in real life.
-    						//setEventMessages($contract->error, $contract->errors, 'errors');
-    					}
-    					else
-    					{
-    						// Now we force disable of recurring invoices
-    					    $object->fetchObjectLinked();
+        					$result = $object->update($user);
+        					if ($result < 0)
+        					{
+        						// We ignore errors. This should not happen in real life.
+        						//setEventMessages($contract->error, $contract->errors, 'errors');
+        					}
+        					else
+        					{
+        						// Now we force disable of recurring invoices
+        					    $object->fetchObjectLinked();
 
-    					    if (is_array($object->linkedObjects['facturerec']))
-    					    {
-    					        foreach($object->linkedObjects['facturerec'] as $idtemplateinvoice => $templateinvoice)
-    					        {
-                                    // Disabled this template invoice
-    					            $res = $templateinvoice->setValueFrom('suspended', 1);
-    					            if ($res)
-    					            {
-    					               $res = $templateinvoice->setValueFrom('note_private', dol_concatdesc($templateinvoice->note_private, 'Disabled by doUndeployOldSuspendedInstances mode='.$mode.' the '.dol_print_date($now, 'dayhour')));
-    					            }
-    					        }
-    					    }
-
-    					    // Delete draft invoices linked to this thirdparty
-    					    if (is_array($object->linkedObjects['facture']))
-    					    {
-        					    foreach ($object->linkedObjects['facture'] as $idinvoice => $invoicetodelete)
+        					    if (is_array($object->linkedObjects['facturerec']))
         					    {
-        					        if ($invoicetodelete->statut == Facture::STATUS_DRAFT)
+        					        foreach($object->linkedObjects['facturerec'] as $idtemplateinvoice => $templateinvoice)
         					        {
-        					            if (preg_match('/\(.*\)/', $invoicetodelete->ref))
+                                        // Disabled this template invoice
+        					            $res = $templateinvoice->setValueFrom('suspended', 1);
+        					            if ($res)
         					            {
-                					        //$sql = "DELETE FROM ".MAIN_DB_PREFIX."facture WHERE fk_statut = ".Facture::STATUS_DRAFT." AND fk_soc = ".$object->fk_soc;
-                					        //$sql.= " AND rowid IN (".join(',', $object->linkedObjectsIds['facture']).")";
-                					        //var_dump($sql);
-            					            $res = $invoicetodelete->delete($user);
-            					            //var_dump($idinvoice.' '.$res);
-        					            }
-        					            else
-        					            {
-        					                dol_syslog("The draft invoice ".$invoicetodelete->ref." has not a ref that match '(...)' so we do not delete it.", LOG_WAR);
+        					               $res = $templateinvoice->setValueFrom('note_private', dol_concatdesc($templateinvoice->note_private, 'Disabled by doUndeployOldSuspendedInstances mode='.$mode.' the '.dol_print_date($now, 'dayhour')));
         					            }
         					        }
         					    }
-    					    }
-    					    //exit;
-    					}
+
+        					    // Delete draft invoices linked to this thirdparty, after a successfull undeploy
+        					    if (is_array($object->linkedObjects['facture']))
+        					    {
+            					    foreach ($object->linkedObjects['facture'] as $idinvoice => $invoicetodelete)
+            					    {
+            					        if ($invoicetodelete->statut == Facture::STATUS_DRAFT)
+            					        {
+            					            if (preg_match('/\(.*\)/', $invoicetodelete->ref))
+            					            {
+                    					        //$sql = "DELETE FROM ".MAIN_DB_PREFIX."facture WHERE fk_statut = ".Facture::STATUS_DRAFT." AND fk_soc = ".$object->fk_soc;
+                    					        //$sql.= " AND rowid IN (".join(',', $object->linkedObjectsIds['facture']).")";
+                    					        //var_dump($sql);
+                					            $res = $invoicetodelete->delete($user);
+                					            //var_dump($idinvoice.' '.$res);
+            					            }
+            					            else
+            					            {
+            					                dol_syslog("The draft invoice ".$invoicetodelete->ref." has not a ref that match '(...)' so we do not delete it.", LOG_WAR);
+            					            }
+            					        }
+            					    }
+        					    }
+        					    //exit;
+        					}
+        				}
+    				} else {
+    				    dol_syslog("Record was qualified by select but not by test after fetch expirationdate=".$expirationdate." datetotest=".$datetotest, LOG_WARNING);
+    				}
+
+    				if (! $error) {
+    				    $this->db->commit();
+
+    				    if ($remotetouse && $mode == 'paid') {
+        				    $contract = $object;
+        				    $tmpcontract = $contract;
+
+        				    if (! empty($conf->global->SELLYOURSAAS_DATADOG_ENABLED))
+        				    {
+        				        try {
+        				            dol_include_once('/sellyoursaas/core/includes/php-datadogstatsd/src/DogStatsd.php');
+
+        				            $arrayconfig=array();
+        				            if (! empty($conf->global->SELLYOURSAAS_DATADOG_APIKEY))
+        				            {
+        				                $arrayconfig=array('apiKey'=>$conf->global->SELLYOURSAAS_DATADOG_APIKEY, 'app_key' => $conf->global->SELLYOURSAAS_DATADOG_APPKEY);
+        				            }
+
+        				            $statsd = new DataDog\DogStatsd($arrayconfig);
+
+                				    // Add flag for paying instance lost
+                				    $ispaidinstance = sellyoursaasIsPaidInstance($contract);
+                				    if ($ispaidinstance)
+                				    {
+                				    	$langs->load("sellyoursaas@sellyoursaas");
+
+                				        dol_syslog("Send other metric sellyoursaas.payinginstancelost to datadog".(get_class($tmpcontract) == 'Contrat' ? ' contractid='.$tmpcontract->id.' contractref='.$tmpcontract->ref: ''));
+                				        $arraytags=null;
+                				        $statsd->increment('sellyoursaas.payinginstancelost', 1, $arraytags);
+
+                				        global $dolibarr_main_url_root;
+                				        $urlwithouturlroot=preg_replace('/'.preg_quote(DOL_URL_ROOT,'/').'$/i','',trim($dolibarr_main_url_root));
+                				        $urlwithroot=$urlwithouturlroot.DOL_URL_ROOT;		// This is to use external domain name found into config file
+                				        //$urlwithroot=DOL_MAIN_URL_ROOT;					// This is to use same domain name than current
+
+                				        $tmpcontract->fetch_thirdparty();
+                				        $mythirdpartyaccount = $tmpcontract->thirdparty;
+
+                				        $sellyoursaasname = $conf->global->SELLYOURSAAS_NAME;
+                				        if (! empty($mythirdpartyaccount->array_options['options_domain_registration_page'])
+                				            && $mythirdpartyaccount->array_options['options_domain_registration_page'] != $conf->global->SELLYOURSAAS_MAIN_DOMAIN_NAME)
+                				        {
+                				            $newnamekey = 'SELLYOURSAAS_NAME_FORDOMAIN-'.$mythirdpartyaccount->array_options['options_domain_registration_page'];
+                				            if (! empty($conf->global->$newnamekey)) $sellyoursaasname = $conf->global->$newnamekey;
+                				        }
+
+                				        $titleofevent = dol_trunc($sellyoursaasname.' - '.gethostname().' - '.$langs->trans("PayingInstanceLost").': '.$tmpcontract->ref, 90);
+                				        $messageofevent = ' - '.$langs->trans("IPAddress").' '.getUserRemoteIP()."\n";
+                				        $messageofevent.= $langs->trans("PayingInstanceLost").': '.$tmpcontract->ref.' ['.$langs->trans("SeeOnBackoffice").']('.$urlwithouturlroot.'/societe/card.php?socid='.$mythirdpartyaccount->id.')'."\n";
+                				        $messageofevent.= 'Lost after cron job made a remoteaction='.$remotetouse."\n";
+
+                				        // See https://docs.datadoghq.com/api/?lang=python#post-an-event
+                				        $statsd->event($titleofevent,
+                				            array(
+                				                'text'       =>  "%%% \n ".$titleofevent.$messageofevent." \n %%%",      // Markdown text
+                				                'alert_type' => 'info',
+                				                'source_type_name' => 'API',
+                				                'host'       => gethostname()
+                				            )
+                				        );
+                				    }
+        				        }
+        				        catch(Exception $e)
+        				        {
+        				            // Nothing
+        				        }
+        				    }
+    				    }
+    				} else {
+    				    $this->db->rollback();
     				}
     			}
     			$i++;
@@ -2838,8 +2964,6 @@ class SellYourSaasUtils
     	}
 
     	$this->output = count($contractprocessed).' contract(s), in mode '.$mode.', suspended, with a planned end date before '.dol_print_date($datetotest, 'dayrfc').' undeployed'.(count($contractprocessed)>0 ? ' : '.join(',', $contractprocessed) : '');
-
-    	$this->db->commit();
 
     	return ($error ? 1: 0);
     }
@@ -3150,7 +3274,10 @@ class SellYourSaasUtils
     			}
     			if (empty($serverdeployment))	// Failed to get remote ip
     			{
-    				dol_syslog(($this->error ? $this->error : 'Failed to get ip for deployment server'), LOG_ERR);
+    				if (empty($this->error)) {
+    					$this->error = 'Failed to get ip for deployment server';
+    				}
+    				dol_syslog($this->error.' domainname='.$domainname.' contract='.$contract->array_options['options_deployment_host'], LOG_ERR);
     				$error++;
     				break;
     			}
@@ -3208,10 +3335,9 @@ class SellYourSaasUtils
 	    			}
 	    			else
 	    			{
-		    			// Check if SSL certificate for $customurl exists. If it does not exist, return an error to ask to upload certificate first.
-	    				// FIXME Detection of /etc/apache2/'.$CERTIFFORCUSTOMDOMAIN.'.crt' fails due to basedir. Save them into another dir than /etc/apache2.
-		    			if (! file_exists('/etc/apache2/'.$CERTIFFORCUSTOMDOMAIN.'.crt'))
-		    			{
+	    				// Check if SSL certificate for $customurl exists. If it does not exist, return an error to ask to upload certificate first.
+	    				if (! file_exists($conf->sellyoursaas->dir_output.'/crt/'.$CERTIFFORCUSTOMDOMAIN.'.crt'))
+	    				{
 		    			    // TODO Return error to ask to upload a certificate first.
 		    			    $CERTIFFORCUSTOMDOMAIN=getDomainFromURL($customurl, 2);
 		    				$SSLON='Off';
@@ -3383,9 +3509,7 @@ class SellYourSaasUtils
     				// Execute personalized SQL requests (sqlafter)
 			    	if (! $error)
 			    	{
-			    		$sqltoexecute = make_substitutions($tmppackage->sqlafter, $substitarray);
-
-			    		dol_syslog("Try to connect to customer instance database to execute personalized requests substitarray=".join(',', $substitarray));
+			    		dol_syslog("Try to connect to customer instance database to execute personalized requests");
 
 			    		//var_dump($generateddbhostname);	// fqn name dedicated to instance in dns
 			    		//var_dump($serverdeployment);		// just ip of deployement server
@@ -3396,10 +3520,17 @@ class SellYourSaasUtils
 			    			$error++;
 			    			$this->error = $dbinstance->error;
 			    			$this->errors = $dbinstance->errors;
-
 			    		}
 			    		else
 			    		{
+			    			$substitarrayforsql = array();
+			    			foreach($substitarray as $key => $val) {
+			    				$substitarrayforsql[$key] = $dbinstance->escape($val);
+			    			}
+			    			dol_syslog("newsubstitarray=".join(',', $substitarrayforsql));
+
+			    			$sqltoexecute = make_substitutions($tmppackage->sqlafter, $substitarrayforsql);
+
 			    			$arrayofsql=explode(';', $sqltoexecute);
 			    			foreach($arrayofsql as $sqltoexecuteline)
 			    			{
@@ -3459,8 +3590,7 @@ class SellYourSaasUtils
     				    else
     				    {
     				        // Check if SSL certificate for $customurl exists. If it does not exist, return an error to ask to upload certificate first.
-    				        // FIXME Detection of /etc/apache2/'.$CERTIFFORCUSTOMDOMAIN.'.crt' fails due to basedir. Save them into another dir than /etc/apache2.
-    				        if (! file_exists('/etc/apache2/'.$CERTIFFORCUSTOMDOMAIN.'.crt'))
+    				    	if (! file_exists($conf->sellyoursaas->dir_output.'/crt/'.$CERTIFFORCUSTOMDOMAIN.'.crt'))
     				        {
     				            include_once DOL_DOCUMENT_ROOT.'/core/lib/geturl.lib.php';
     				            $CERTIFFORCUSTOMDOMAIN=getDomainFromURL($customurl, 2);
@@ -3547,16 +3677,16 @@ class SellYourSaasUtils
     					//$serverdeployment = $this->getRemoveServerDeploymentIp($domainname);
     					$serverdeployment = $contract->array_options['options_deployment_host'];
 
-    					dol_syslog("Try to connect to remote instance database (at ".$serverdeployment.") to execute formula calculation");
+    					dol_syslog("Try to connect to remote instance database (at ".$generateddbhostname.") to execute formula calculation");
 
     					//var_dump($generateddbhostname);	// fqn name dedicated to instance in dns
     					//var_dump($serverdeployment);		// just ip of deployment server
     					//$dbinstance = @getDoliDBInstance('mysqli', $generateddbhostname, $generateddbusername, $generateddbpassword, $generateddbname, $generateddbport);
-    					$dbinstance = @getDoliDBInstance('mysqli', $serverdeployment, $generateddbusername, $generateddbpassword, $generateddbname, $generateddbport);
+    					$dbinstance = @getDoliDBInstance('mysqli', $generateddbhostname, $generateddbusername, $generateddbpassword, $generateddbname, $generateddbport);
     					if (! $dbinstance || ! $dbinstance->connected)
     					{
     						$error++;
-    						$this->error = $dbinstance->error;
+    						$this->error = $dbinstance->error.' ('.$generateddbusername.'@'.$generateddbhostname.'/'.$generateddbname.')';
     						$this->errors = $dbinstance->errors;
     					}
     					else
@@ -3743,6 +3873,7 @@ class SellYourSaasUtils
     		}
     	}
 
+    	// Complete message if error
     	$recordanevent = 0;
     	$prefixlabel = '';
     	if ($forceaddevent && (get_class($object) == 'Contrat' || get_class($object) == 'ContratLigne'))
@@ -3766,7 +3897,6 @@ class SellYourSaasUtils
     	if ($recordanevent)
     	{
     	    $tmpcontract = $object;
-
     	    if (get_class($object) == 'ContratLigne')
     	    {
     	        $tmpcontract = new Contrat($this->db);
@@ -3829,20 +3959,16 @@ class SellYourSaasUtils
 
         	    $arraytags=array('remoteaction'=> ($remoteaction?$remoteaction:'unknown'), 'result'=>($error ? 'ko' : 'ok'));
 
+        	    $tmpcontract = $object;
+        	    if (get_class($object) == 'ContratLigne')
+        	    {
+        	        $tmpcontract = new Contrat($this->db);
+        	        $tmpcontract->fetch($object->fk_contrat);
+        	    }
+
+        	    dol_syslog("Send info to datadog".(get_class($tmpcontract) == 'Contrat' ? ' contractid='.$tmpcontract->id.' contractref='.$tmpcontract->ref: '')." remoteaction=".($remoteaction?$remoteaction:'unknown')." result=".($error ? 'ko' : 'ok'));
+
         	    $statsd->increment('sellyoursaas.remoteaction', 1, $arraytags);
-
-                // Add flag for customer lost
-                if ($ispaidinstance)
-                {
-                    if (in_array($remoteaction, array('undeploy', 'undeployall')))
-                    {
-                        // Check if customer has still an instance on
-                        // TODO
-
-       	                $arraytags=null;
-       	                $statsd->increment('sellyoursaas.payingcustomerlost', 1, $arraytags);
-                    }
-                }
     	    }
     	    catch(Exception $e)
     	    {
@@ -3851,7 +3977,7 @@ class SellYourSaasUtils
     	}
 
 
-    	dol_syslog("* sellyoursaasRemoteAction END (remoteaction=".$remoteaction." email=".$email." password=".$password." error=".$error." retarray['http_code']=".$retarray['http_code'].")", LOG_DEBUG, -1);
+    	dol_syslog("* sellyoursaasRemoteAction END (remoteaction=".$remoteaction." email=".$email." password=".$password." error=".$error." result=".($error ? 'ko' : 'ok')." retarray['http_code']=".$retarray['http_code'].(get_class($object) == 'Contrat' ? ' contractid='.$object->id.' contractref='.$object->ref: '').")", LOG_DEBUG, -1);
 
     	if ($error) return -1;
     	else return 1;

@@ -62,7 +62,6 @@ if (! $res) die("Include of master fails");
 // After this $db, $mysoc, $langs, $conf and $hookmanager are defined (Opened $db handler to database will be closed at end of file).
 // $user is created but empty.
 
-dol_include_once('/sellyoursaas/class/dolicloud_customers.class.php');
 include_once DOL_DOCUMENT_ROOT.'/core/lib/geturl.lib.php';
 include_once dol_buildpath("/sellyoursaas/backoffice/lib/refresh.lib.php");
 
@@ -146,23 +145,25 @@ if (! isset($argv[1])) {	// Check parameters
     print "- backuprsync         creates backup (rsync)\n";
     print "- backupdatabase      creates backup (mysqldump)\n";
     print "- backup              creates backup (rsync + mysqldump) ***** Used by cron on deployment servers *****\n";
-    print "- updatedatabase      (=updatecountsonly+updatestatsonly) updates list and nb of users, modules and version and stats\n";
+    print "- updatedatabase      (=updatecountsonly+updatestatsonly) updates list and nb of users, modules and version and stats.\n";
     print "- updatecountsonly    updates counters of instances only (only nb of user for instances)\n";
-    print "- updatestatsonly     updates stats only (only table dolicloud_stats) ***** Used by cron on master server *****\n";
+    print "- updatestatsonly     updates stats only (only table dolicloud_stats) and send data to Datagog if enabled ***** Used by cron on master server *****\n";
     exit;
 }
-print '--- start'."\n";
+print '--- start '.$argv[1]."\n";
 //print 'Argument 1='.$argv[1]."\n";
 //print 'Argument 2='.$argv[2]."\n";
 
 $now = dol_now();
 
 $action=$argv[1];
-$nbofko=0;
 $nbofok=0;
+// Nb of deployed instances
+$nbofinstancedeployed=0;
+// Nb of paying instance
+$nbofactiveok=0;
 $nbofactive=0;
 $nbofactivesusp=0;
-$nbofactiveclosurerequest=0;
 $nbofactivepaymentko=0;
 $nbofalltime=0;
 $nboferrors=0;
@@ -201,7 +202,7 @@ if ($instancefiltercomplete) {
     }
     $sql.= " AND c.ref_customer IN (".$stringforsearch.")";
 }
-else $sql.= " AND ce.deployment_status <> 'undeployed'";		// Exclude undeployed only if we don't request a specific instance
+else $sql.= " AND ce.deployment_status = 'done'";		// Get 'deployed' only, but only if we don't request a specific instance
 $sql.= " AND ce.deployment_status IS NOT NULL";
 // Add filter on deployment server
 if ($action == 'backup' || $action == 'backuprsync' || $action == 'backupdatabase' || $action == 'backuptestrsync' || $action == 'backuptestdatabase')
@@ -227,31 +228,30 @@ if ($resql)
 			{
 				$instance = $obj->instance;
 				$payment_status='PAID';
-				$subscription_status = 'OPEN';
 
-				$found = true;
 				dol_include_once('/sellyoursaas/lib/sellyoursaas.lib.php');
 
-				$instance_status_bis = '';
 				$result = $object->fetch($obj->id);
-				if ($result <= 0) $found=false;
+				if ($result <= 0) {
+				    $i++;
+				    dol_print_error($dbmaster, $object->error, $object->errors);
+				    continue;
+				}
 				else
 				{
 					if ($object->array_options['options_deployment_status'] == 'processing') { $instance_status = 'PROCESSING'; }
-					elseif ($object->array_options['options_deployment_status'] == 'undeployed') { $instance_status = 'CLOSED'; $instance_status_bis = 'UNDEPLOYED'; }
-					elseif ($object->array_options['options_deployment_status'] == 'done')       { $instance_status = 'DEPLOYED'; }
+					elseif ($object->array_options['options_deployment_status'] == 'undeployed') { $instance_status = 'UNDEPLOYED'; }
+					elseif ($object->array_options['options_deployment_status'] == 'done')       {
+                        $instance_status = 'DEPLOYED';
+                        $nbofinstancedeployed++;
+					}
 					else { $instance_status = 'UNKNOWN'; }
 				}
 
 				$issuspended = sellyoursaasIsSuspended($object);
 				if ($issuspended)
 				{
-					$subscription_status = 'CLOSED';
 					$instance_status = 'SUSPENDED';
-				}
-				else
-				{
-					$subscription_status = 'OPEN';
 				}
 
 				$ispaid = sellyoursaasIsPaidInstance($object);
@@ -262,14 +262,13 @@ if ($resql)
 					if ($ispaymentko) $payment_status='FAILURE';
 				}
 
-				if (empty($instance_status_bis)) $instance_status_bis=$instance_status;
-				print "Analyze instance ".($i+1)." ".$instance." status=".$instance_status." instance_status=".$instance_status_bis." payment_status=".$payment_status." subscription_status=".$subscription_status."\n";
+				print "Analyze instance ".($i+1)." ".$instance." instance_status=".$instance_status." payment_status=".$payment_status."\n";
 
 				// Count
-				if (! in_array($payment_status,array('TRIAL','TRIALING','TRIAL_EXPIRED')))
+				if (! in_array($payment_status,array('TRIAL')))
 				{
 					$nbofalltime++;
-					if (! in_array($instance_status,array('PROCESSING')) && ! in_array($instance_status,array('CLOSED')) && ! in_array($instance_status_bis,array('UNDEPLOYED')))		// Nb of active
+					if (! in_array($instance_status,array('PROCESSING', 'UNDEPLOYED')))		// Nb of active
 					{
 						$nbofactive++;
 
@@ -278,26 +277,25 @@ if ($resql)
 							$nbofactivesusp++;
 							$instancesactivebutsuspended[$obj->id]=$obj->ref.' ('.$instance.')';
 						}
-						else if (in_array($instance_status,array('CLOSE_QUEUED','CLOSURE_REQUESTED')) ) $nbofactiveclosurerequest++;
 						else if (in_array($payment_status,array('FAILURE','PAST_DUE'))) $nbofactivepaymentko++;
 						else $nbofactiveok++; // not suspended, not close request
 
 						$instances[$obj->id]=$instance;
-						print "Qualify instance ".$instance." with instance_status=".$instance_status." instance_status_bis=".$instance_status_bis." payment_status=".$payment_status." subscription_status(not used)=".$subscription_status."\n";
+						print "Qualify instance ".$instance." with instance_status=".$instance_status." payment_status=".$payment_status."\n";
 					}
 					else
 					{
-						//print "Found instance ".$instance." with instance_status=".$instance_status." instance_status_bis=".$instance_status_bis." payment_status=".$payment_status." subscription_status(not used)=".$obj->subscription_status."\n";
+						//print "Found instance ".$instance." with instance_status=".$instance_status." instance_status_bis=".$instance_status_bis." payment_status=".$payment_status."\n";
 					}
 				}
 				elseif ($instancefiltercomplete)
 				{
 					$instances[$obj->id]=$instance;
-					print "Qualify instance ".$instance." with instance_status=".$instance_status." instance_status_bis=".$instance_status_bis." payment_status=".$payment_status." subscription_status(not used)=".$obj->subscription_status."\n";
+					print "Qualify instance ".$instance." with instance_status=".$instance_status." payment_status=".$payment_status."\n";
 				}
 				else
 				{
-					//print "Found instance ".$instance." with instance_status=".$instance_status." instance_status_bis=".$instance_status_bis." payment_status=".$payment_status." subscription_status(not used)=".$obj->subscription_status."\n";
+					//print "Found instance ".$instance." with instance_status=".$instance_status." instance_status_bis=".$instance_status_bis." payment_status=".$payment_status."\n";
 				}
 			}
 			$i++;
@@ -310,7 +308,7 @@ else
 	$nboferrors++;
 	dol_print_error($dbtousetosearch);
 }
-print "Found ".count($instances)." not trial instances including ".$nbofactivesusp." suspended + ".$nbofactiveclosurerequest." active with closure request + ".$nbofactivepaymentko." active with payment ko\n";
+print "Found ".count($instances)." not trial instances including ".$nbofactivesusp." suspended + ".$nbofactivepaymentko." active with payment ko\n";
 
 
 //print "----- Start loop for backup_instance\n";
@@ -494,7 +492,7 @@ if ($action == 'updatedatabase' || $action == 'updatestatsonly' || $action == 'u
 
 				$x=sprintf("%04d%02d",$year,$m);
 
-				$statkeylist=array('total','totalcommissions','totalinstancespaying','totalinstances','totalusers','benefit','totalcustomerspaying','totalcustomers');
+				$statkeylist=array('total','totalcommissions','totalinstancespaying','totalinstancespayingall','totalinstances','totalusers','benefit','totalcustomerspaying','totalcustomers');
 				foreach($statkeylist as $statkey)
 				{
 					if (! isset($stats[$statkey][$x]) || ($today <= $datelastday))
@@ -513,6 +511,7 @@ if ($action == 'updatedatabase' || $action == 'updatestatsonly' || $action == 'u
 							$total=$rep['total'];
 							$totalcommissions=$rep['totalcommissions'];
 							$totalinstancespaying=$rep['totalinstancespaying'];
+							$totalinstancespayingall=$rep['totalinstancespayingall'];
 							$totalinstances=$rep['totalinstances'];
 							$totalusers=$rep['totalusers'];
 							$totalcustomerspaying=$rep['totalcustomerspaying'];
@@ -523,6 +522,7 @@ if ($action == 'updatedatabase' || $action == 'updatestatsonly' || $action == 'u
 							if ($statkey == 'total') $y=$total;
 							if ($statkey == 'totalcommissions') $y=$totalcommissions;
 							if ($statkey == 'totalinstancespaying') $y=$totalinstancespaying;
+							if ($statkey == 'totalinstancespayingall') $y=$totalinstancespayingall;
 							if ($statkey == 'totalinstances') $y=$totalinstances;
 							if ($statkey == 'totalusers') $y=$totalusers;
 							if ($statkey == 'benefit') $y=$benefit;
@@ -559,13 +559,19 @@ if ($action == 'updatedatabase' || $action == 'updatestatsonly' || $action == 'u
 
 // Result
 $out = '';
+if ($action == 'backup' || $action == 'backuprsync' || $action == 'backupdatabase' || $action == 'backuptestrsync' || $action == 'backuptestdatabase') {
+    $out.= "\n";
+    $out.= "***** Summary for host ".$ipserverdeployment."\n";
+} else {
+    $out.= "***** Summary for all deployment servers\n";
+}
+$out.= "Nb of instances deployed: ".$nbofinstancedeployed."\n";
 $out.= "Nb of paying instances (all time): ".$nbofalltime."\n";
-$out.= "Nb of paying instances (active with or without payment error, close request or not): ".$nbofactive."\n";
-$out.= "Nb of paying instances (active but close request): ".$nbofactiveclosurerequest."\n";
-$out.= "Nb of paying instances (active but suspended): ".$nbofactivesusp;
+$out.= "Nb of paying instances (deployed with or without payment error): ".$nbofactive."\n";
+$out.= "Nb of paying instances (deployed but suspended): ".$nbofactivesusp;
 $out.= (count($instancesactivebutsuspended)?", suspension on ".join(', ',$instancesactivebutsuspended):"");
 $out.= "\n";
-$out.= "Nb of paying instances (active but payment ko, not yet suspended): ".$nbofactivepaymentko."\n";
+$out.= "Nb of paying instances (deployed but payment ko, not yet suspended): ".$nbofactivepaymentko."\n";
 if ($action != 'updatestatsonly')
 {
 	$out.= "Nb of paying instances processed ok: ".$nbofok."\n";
@@ -575,6 +581,36 @@ $out.= (count($instancesbackuperror)?", error for backup on ".join(', ',$instanc
 $out.= (count($instancesupdateerror)?", error for update on ".join(', ',$instancesupdateerror):"");
 $out.= "\n";
 print $out;
+
+
+// Send to DataDog (metric)
+if ($action == 'updatestatsonly') {
+    if (! empty($conf->global->SELLYOURSAAS_DATADOG_ENABLED))
+    {
+        try {
+            print 'Send data to DataDog'."\n";
+            dol_include_once('/sellyoursaas/core/includes/php-datadogstatsd/src/DogStatsd.php');
+
+            $arrayconfig=array();
+            if (! empty($conf->global->SELLYOURSAAS_DATADOG_APIKEY))
+            {
+                $arrayconfig=array('apiKey'=>$conf->global->SELLYOURSAAS_DATADOG_APIKEY, 'app_key' => $conf->global->SELLYOURSAAS_DATADOG_APPKEY);
+            }
+
+            $statsd = new DataDog\DogStatsd($arrayconfig);
+
+            $arraytags=null;
+            $statsd->gauge('sellyoursaas.instancedeployed', (float) $nbofinstancedeployed, 1.0, $arraytags);
+            $statsd->gauge('sellyoursaas.instancepaymentko', (float) $nbofactivesusp+$nbofactivepaymentko, 1.0, $arraytags);
+            $statsd->gauge('sellyoursaas.instancepaymentok', (float) $nbofactive-($nbofactivesusp+$nbofactivepaymentko), 1.0, $arraytags);
+        }
+        catch(Exception $e)
+        {
+
+        }
+    }
+}
+
 if (! $nboferrors)
 {
 	print '--- end OK - '.strftime("%Y%m%d-%H%M%S")."\n";
@@ -597,6 +633,7 @@ if (! $nboferrors)
 		}
 
 		include_once DOL_DOCUMENT_ROOT.'/core/class/CMailFile.class.php';
+		print 'Send email MAIN_MAIL_SENDMODE='.$conf->global->MAIN_MAIL_SENDMODE.' MAIN_MAIL_SMTP_SERVER='.$conf->global->MAIN_MAIL_SMTP_SERVER.' from='.$from.' to='.$to.' title=['.$sellyoursaasname.' - '.gethostname().'] Success for backup'."\n";
 		$cmail = new CMailFile('['.$sellyoursaasname.' - '.gethostname().'] Success for backup', $to, $from, $msg);
 		$result = $cmail->sendfile();
 	}
@@ -609,9 +646,12 @@ else
 	{
 		$from = $conf->global->SELLYOURSAAS_NOREPLY_EMAIL;
 		$to = $conf->global->SELLYOURSAAS_SUPERVISION_EMAIL;
+		// Supervision tools are generic for all domain. No ay to target a specific supervision email.
+
 		$msg = 'Error in '.$script_file." ".$argv[1]." ".$argv[2]."\n\n".$out;
 
 		include_once DOL_DOCUMENT_ROOT.'/core/class/CMailFile.class.php';
+		print 'Send email MAIN_MAIL_SENDMODE='.$conf->global->MAIN_MAIL_SENDMODE.' MAIN_MAIL_SMTP_SERVER='.$conf->global->MAIN_MAIL_SMTP_SERVER.' from='.$from.' to='.$to.' title=[Warning] Error(s) in backups - '.gethostname().' - '.dol_print_date(dol_now(), 'dayrfc')."\n";
 		$cmail = new CMailFile('[Warning] Error(s) in backups - '.gethostname().' - '.dol_print_date(dol_now(), 'dayrfc'), $to, $from, $msg, array(), array(), array(), '', '', 0, 0, '', '', '', '', 'emailing');
 		$result = $cmail->sendfile();
 

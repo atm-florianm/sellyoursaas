@@ -1,5 +1,5 @@
 <?php
-/* Copyright (C) 2007-2018 Laurent Destailleur  <eldy@users.sourceforge.net>
+/* Copyright (C) 2007-2020 Laurent Destailleur  <eldy@users.sourceforge.net>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -106,7 +106,26 @@ $form=new Form($db);
 
 llxHeader('',$langs->transnoentitiesnoconv('DoliCloudCustomers'),'');
 
-print_fiche_titre($langs->trans("DoliCloudArea"));
+//print_fiche_titre($langs->trans("DoliCloudArea"));
+
+
+$h = 0;
+$head = array();
+
+$head[$h][0] = 'index.php';
+$head[$h][1] = $langs->trans("Home");
+$head[$h][2] = 'home';
+$h++;
+
+$head[$h][0] = DOL_URL_ROOT.'/core/customreports.php?objecttype=contract&tabfamily=sellyoursaas';
+$head[$h][1] = $langs->trans("CustomReports");
+$head[$h][2] = 'customreports';
+$h++;
+
+
+//$head = commande_prepare_head(null);
+dol_fiche_head($head, 'home', $langs->trans("DoliCloudArea"), -1, 'sellyoursaas@sellyoursaas');
+
 
 $tmparray=dol_getdate(dol_now());
 $endyear=$tmparray['year'];
@@ -190,15 +209,54 @@ if ($resql)
     $db->free($resql);
 }
 else dol_print_error($db);
-print '<table class="noborder nohover" width="100%">';
+
+print "\n";
+print "<!-- section of deployment servers -->\n";
+print '<div class="div-table-responsive-no-min">'; // You can use div-table-responsive-no-min if you dont need reserved height for your table
+print '<table class="noborder nohover centpercent">';
 print '<tr class="liste_titre">';
 print '<td>'.$langs->trans('DeploymentServers').'</td></tr>';
-print '<tr class="oddeven">';
+print '<tr class="oddeven nohover">';
 print '<td>'.$langs->trans('SellYourSaasSubDomainsIPDeployed').': <strong>'.join(', ',$listofipwithinstances).'</strong></td>';
 print '</tr>';
-print '<tr class="oddeven">';
-print '<td>'.$langs->trans('SellYourSaasSubDomainsIP').': <strong>'.$conf->global->SELLYOURSAAS_SUB_DOMAIN_IP.'</strong> for domain name <strong>'.$conf->global->SELLYOURSAAS_SUB_DOMAIN_NAMES.'</strong></td>';
+print '<tr class="">';
+print '<td>';
+$helptooltip = "SELLYOURSAAS_SUB_DOMAIN_IP = ".$conf->global->SELLYOURSAAS_SUB_DOMAIN_IP.'<br><br>SELLYOURSAAS_SUB_DOMAIN_NAMES = '.$conf->global->SELLYOURSAAS_SUB_DOMAIN_NAMES;
+print $form->textwithpicto($langs->trans('SellYourSaasSubDomainsIP'), $helptooltip).':<br>';
+print '<table class="noborder">';
+print '<tr class="liste_titre_bidon"><td>'.$langs->trans("IP").'</td><td>'.$langs->trans("Domain").'</td><td>';
+$helptooltip = img_warning('', '').' '.$langs->trans("EvenIfDomainIsOpenTo");
+print $form->textwithpicto($langs->trans("Registration"), $helptooltip);
+print '</td><td></td><td></td></tr>';
+$listofips = explode(',', $conf->global->SELLYOURSAAS_SUB_DOMAIN_IP);
+$listofdomains = explode(',', $conf->global->SELLYOURSAAS_SUB_DOMAIN_NAMES);
+foreach($listofips as $key => $val) {
+	$tmparraydomain = explode(':', $listofdomains[$key]);
+	print '<tr class="oddeven"><td>'.$val.'</td><td>'.$tmparraydomain[0].'</td><td>';
+	if (! empty($tmparraydomain[1])) {
+		if (in_array($tmparraydomain[1], array('bidon', 'hidden', 'closed'))) {
+			print $langs->trans("Closed");
+		} else {
+			print img_picto($langs->trans("Open"), 'check', '', false, 0, 0, '', 'paddingright', 0).$langs->trans("OnDomainOnly", $tmparraydomain[1]);
+		}
+	} else {
+		print img_picto($langs->trans("Open"), 'check', '', false, 0, 0, '', 'paddingright', 0).$langs->trans("Open");
+	}
+	print '</td>';
+	print '<td>';
+	$commandstartstop = 'sudo '.$conf->global->DOLICLOUD_SCRIPTS_PATH.'/remote_server_launcher.sh start|status|stop';
+	print $form->textwithpicto($langs->trans("StartStopAgent"), $langs->trans("CommandToManageRemoteDeploymentAgent").':<br><br>'.$commandstartstop, 1, 'help', '', 0, 3, 'startstop'.$key).'<br>';
+	print '</td>';
+	print '<td>';
+	$commandstartstop = 'sudo '.$conf->global->DOLICLOUD_SCRIPTS_PATH.'/make_instances_offline.sh '.$conf->global->SELLYOURSAAS_ACCOUNT_URL.'/offline.php test|offline|online';
+	print $form->textwithpicto($langs->trans("OnlineOffline"), $langs->trans("CommandToPutInstancesOnOffline").':<br><br>'.$commandstartstop, 1, 'help', '', 0, 3, 'onoff'.$key).'<br>';
+	print '</td>';
+	print '</tr>';
+}
+print '</table>';
+print '</td>';
 print '</tr>';
+/*
 print '<tr class="oddeven"><td>';
 print $langs->trans("CommandToManageRemoteDeploymentAgent").'<br>';
 print '<textarea class="flat inputsearch centpercent" type="text" name="SELLYOURSAAS_ANNOUNCE">';
@@ -214,7 +272,10 @@ print '<a class="button" href="'.$_SERVER["PHP_SELF"].'?action=makeoffline">'.$l
 print ' &nbsp; - &nbsp; ';
 print '<a class="button" href="'.$_SERVER["PHP_SELF"].'?action=makeonline">'.$langs->trans("PutAllInstancesOnLine").'</a>';
 print '</td></tr>';
-print "</table><br>";
+*/
+print "</table>";
+print '</div>';
+print "<br>";
 
 
 print '</div><div class="fichetwothirdright"><div class="ficheaddleft">';
@@ -226,7 +287,7 @@ $totalinstances=0;
 $totalinstancespaying=0;
 $totalcommissions=0;
 $totalresellers=0;
-$serverprice = empty($conf->global->SELLYOURSAAS_INFRA_COST)?'100':$conf->global->SELLYOURSAAS_INFRA_COST;
+$serverprice = empty($conf->global->SELLYOURSAAS_INFRA_COST)?'0':$conf->global->SELLYOURSAAS_INFRA_COST;
 
 $sql = 'SELECT COUNT(*) as nb FROM '.MAIN_DB_PREFIX.'societe as s, '.MAIN_DB_PREFIX.'categorie_fournisseur as c';
 $sql.= ' WHERE c.fk_soc = s.rowid AND s.status = 1 AND c.fk_categorie = '.$conf->global->SELLYOURSAAS_DEFAULT_RESELLER_CATEG;
@@ -239,21 +300,27 @@ if ($resql)
 
 if ($mode == 'refreshstats')
 {
-	$rep=sellyoursaas_calculate_stats($db,'');	// $datelastday is last day of current month
+	$rep=sellyoursaas_calculate_stats($db, '');	// $datelastday is last day of current month
 
 	$total=$rep['total'];
 	$totalcommissions=$rep['totalcommissions'];
 	$totalinstancespaying=$rep['totalinstancespaying'];
-	$totalinstancessuspended=$rep['totalinstancessuspended'];
-	$totalinstancesexpired=$rep['totalinstancesexpired'];
+	$totalinstancespayingall=$rep['totalinstancespayingall'];
+	$totalinstancessuspendedfree=$rep['totalinstancessuspendedfree'];
+	$totalinstancessuspendedpaying=$rep['totalinstancessuspendedpaying'];
+	$totalinstancesexpiredfree=$rep['totalinstancesexpiredfree'];
+	$totalinstancesexpiredpaying=$rep['totalinstancesexpiredpaying'];
 	$totalinstances=$rep['totalinstances'];
 	$totalusers=$rep['totalusers'];
 
 	$_SESSION['stats_total']=$total;
 	$_SESSION['stats_totalcommissions']=$totalcommissions;
 	$_SESSION['stats_totalinstancespaying']=$totalinstancespaying;
-	$_SESSION['stats_totalinstancessuspended']=$totalinstancessuspended;
-	$_SESSION['stats_totalinstancesexpired']=$totalinstancesexpired;
+	$_SESSION['stats_totalinstancespayingall']=$totalinstancespayingall;
+	$_SESSION['stats_totalinstancessuspendedfree']=$totalinstancessuspendedfree;
+	$_SESSION['stats_totalinstancesexpiredfree']=$totalinstancesexpiredfree;
+	$_SESSION['stats_totalinstancessuspendedpaying']=$totalinstancessuspendedpaying;
+	$_SESSION['stats_totalinstancesexpiredpaying']=$totalinstancesexpiredpaying;
 	$_SESSION['stats_totalinstances']=$totalinstances;
 	$_SESSION['stats_totalusers']=$totalusers;
 }
@@ -262,8 +329,11 @@ else
 	$total = $_SESSION['stats_total'];
 	$totalcommissions = $_SESSION['stats_totalcommissions'];
 	$totalinstancespaying = $_SESSION['stats_totalinstancespaying'];
-	$totalinstancessuspended = $_SESSION['stats_totalinstancessuspended'];
-	$totalinstancesexpired = $_SESSION['stats_totalinstancesexpired'];
+	$totalinstancespayingall = $_SESSION['stats_totalinstancespayingall'];
+	$totalinstancessuspendedfree = $_SESSION['stats_totalinstancessuspendedfree'];
+	$totalinstancesexpiredfree = $_SESSION['stats_totalinstancesexpiredfree'];
+	$totalinstancessuspendedpaying = $_SESSION['stats_totalinstancessuspendedpaying'];
+	$totalinstancesexpiredpaying = $_SESSION['stats_totalinstancesexpiredpaying'];
 	$totalinstances = $_SESSION['stats_totalinstances'];
 	$totalusers = $_SESSION['stats_totalusers'];
 }
@@ -277,9 +347,10 @@ $benefit=price2num(($total * (1 - $part) - $serverprice - $totalcommissions), 'M
 print '<table class="noborder" width="100%">';
 print '<tr class="liste_titre">';
 print '<td class="wordwrap wordbreak"><span class="valignmiddle">'.$langs->trans('MasterServer').' - '.$langs->trans("Statistics").'</span>';
+print '</td>';
+print '<td class="right">';
 print '<a href="'.$_SERVER["PHP_SELF"].'?mode=refreshstats">'.img_picto('', 'refresh', '', false, 0, 0, '', 'valignmiddle').'</a>';
 print '</td>';
-print '<td></td>';
 print '</tr>';
 print '<tr class="oddeven"><td class="wordwrap wordbreak">';
 print $langs->trans("NbOfResellers");
@@ -287,10 +358,24 @@ print '</td><td align="right">';
 print '<font size="+2">'.$totalresellers.'</font>';
 print '</td></tr>';
 print '<tr class="oddeven"><td class="wordwrap wordbreak">';
-print $form->textwithpicto($langs->trans("NbOfInstancesActivePaying"), $langs->trans("NbOfInstancesActivePayingDesc"));
-print ' / '.$langs->trans("NbOfActiveInstances").' ';
+$texthelp = $langs->trans("NbOfInstancesActivePayingDesc");
+$stringlistofinstancespayingwithoutrecinvoice = '';
+$nboflistofinstancespayingwithoutrecinvoice = 0;
+if (is_array($rep['listofinstancespayingwithoutrecinvoice']))
+{
+	$nboflistofinstancespayingwithoutrecinvoice = count($rep['listofinstancespayingwithoutrecinvoice']);
+	$rep['listofinstancespayingwithoutrecinvoice'] = dol_sort_array($rep['listofinstancespayingwithoutrecinvoice'], 'thirdparty_name');
+	foreach($rep['listofinstancespayingwithoutrecinvoice'] as $arrayofcontract)
+	{
+		$stringlistofinstancespayingwithoutrecinvoice .= ($stringlistofinstancespayingwithoutrecinvoice ? ', ' : '').$arrayofcontract['thirdparty_name'].' - '.$arrayofcontract['contract_ref']."\n";
+	}
+}
+print $form->textwithpicto($langs->trans("NbOfInstancesActivePaying"), $texthelp);
+$texthelp = $langs->trans("NbOfInstancesActivePayingWithoutRecInvoice", $nboflistofinstancespayingwithoutrecinvoice);
+if ($stringlistofinstancespayingwithoutrecinvoice) $texthelp.=' ('.$stringlistofinstancespayingwithoutrecinvoice.')';
+print ' | '.$form->textwithpicto($langs->trans("NbOfInstancesActivePayingAll"), $texthelp).' | '.$langs->trans("NbOfActiveInstances").' ';
 print '</td><td align="right">';
-if (! empty($_SESSION['stats_totalusers'])) print '<font size="+2">'.$totalinstancespaying.' / '.$totalinstances.'</font>';
+if (! empty($_SESSION['stats_totalusers'])) print '<font size="+2">'.$totalinstancespaying.' | '.$totalinstancespayingall.' | '.$totalinstances.'</font>';
 else print '<span class="opacitymedium">'.$langs->trans("ClickToRefresh").'</span>';
 print '<!-- List of instances : '."\n";
 if (is_array($rep['listofinstancespaying']))
@@ -304,10 +389,11 @@ if (is_array($rep['listofinstancespaying']))
 print "\n".'-->';
 print '</td></tr>';
 print '<tr class="oddeven"><td class="wordwrap wordbreak">';
-print $langs->trans("NbOfSuspendedInstances").' ';
-print ' + '.$langs->trans("NbOfExpiredInstances").' ';
+print $langs->trans("NbOfSuspendedInstances").' '.$langs->trans("payed").' | '.$langs->trans("test");
 print '</td><td align="right">';
-if (! empty($_SESSION['stats_totalusers'])) print '<font size="+2">'.$totalinstancessuspended.' + '.$totalinstancesexpired.'</font>';
+if (! empty($_SESSION['stats_totalusers'])) {
+	print '<font size="+2">'.$totalinstancessuspendedpaying.' | '.$totalinstancessuspendedfree.'</font>';
+}
 else print '<span class="opacitymedium">'.$langs->trans("ClickToRefresh").'</span>';
 print '</td></tr>';
 print '<tr class="oddeven"><td>';
@@ -403,10 +489,9 @@ if ($resql)
 }
 else dol_print_error($db);
 
-
 $data2 = array();
 $sql ='SELECT name, x, y FROM '.MAIN_DB_PREFIX.'dolicloud_stats';
-$sql.=" WHERE service = '".$servicetouse."' AND name IN ('totalinstancespaying', 'totalusers')";
+$sql.=" WHERE service = '".$servicetouse."' AND name IN ('totalinstancespaying', 'totalinstancespayingall', 'totalinstances', 'totalusers')";
 $sql.=" ORDER BY x, name";
 $resql=$db->query($sql);
 if ($resql)
@@ -435,7 +520,9 @@ if ($resql)
 		$oldx=$obj->x;
 
 		if ($obj->name == 'totalinstancespaying') $absice[1]=$obj->y;
-		if ($obj->name == 'totalusers') $absice[2]=$obj->y;
+		if ($obj->name == 'totalinstancespayingall') $absice[2]=$obj->y;
+		if ($obj->name == 'totalinstances') $absice[3]=$obj->y;
+		if ($obj->name == 'totalusers') $absice[4]=$obj->y;
 
 		$i++;
 	}
@@ -461,17 +548,19 @@ else
 	$HEIGHT=DolGraph::getDefaultGraphSizeForStats('height');
 }
 
+$fileurlnb = '';
+
 // Show graph
 $px1 = new DolGraph();
 $mesg = $px1->isGraphKo();
 if (! $mesg)
 {
 	$px1->SetData($data1);
-	unset($data1);
+	$data1 = null;
 
 	$legend=array();
-	$legend[0]=$langs->trans("RevenuePerMonth");
-	$legend[1]=$langs->trans("CommissionPerMonth");
+	$legend[0]=$langs->trans("RevenuePerMonth").' ('.$langs->trans("HT").')';
+	$legend[1]=$langs->trans("CommissionPerMonth").' ('.$langs->trans("HT").')';
 	$legend[2]=$langs->trans("BenefitDoliCloud");
 
 	$px1->SetLegend($legend);
@@ -494,11 +583,13 @@ $mesg = $px2->isGraphKo();
 if (! $mesg)
 {
 	$px2->SetData($data2);
-	unset($data2);
+	$data2 = null;
 
 	$legend=array();
-	$legend[0]=$langs->trans("NbOfInstancesPaying");
-	$legend[1]=$langs->trans("NbOfUsers");
+	$legend[0]=$langs->trans("NbOfInstancesActivePaying");
+	$legend[1]=$langs->trans("NbOfInstancesActivePayingAll");
+	$legend[2]=$langs->trans("NbOfActiveInstances");
+	$legend[3]=$langs->trans("NbOfUsers");
 
 	$px2->SetLegend($legend);
 	$px2->SetMaxValue($px2->GetCeilMaxValue());
@@ -508,7 +599,7 @@ if (! $mesg)
 	$px2->SetShading(3);
 	$px2->SetHorizTickIncrement(1);
 	$px2->SetCssPrefix("cssboxes");
-	$px2->SetType(array('lines','lines'));
+	$px2->SetType(array('lines','lines','lines','lines'));
 	$px2->mode='depth';
 	$px2->SetTitle($langs->trans("Instances").'/'.$langs->trans("Users"));
 
@@ -557,6 +648,9 @@ else
 	print '<input class="button" type="submit" name="'.$langs->trans("Save").'">';
 	print '</form>';
 }
+
+
+dol_fiche_end();
 
 
 // End of page

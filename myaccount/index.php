@@ -44,6 +44,7 @@ include ('./mainmyaccount.inc.php');
 $res=0;
 // Try main.inc.php into web root known defined into CONTEXT_DOCUMENT_ROOT (not always defined)
 if (! $res && ! empty($_SERVER["CONTEXT_DOCUMENT_ROOT"])) $res=@include($_SERVER["CONTEXT_DOCUMENT_ROOT"]."/main.inc.php");
+if (! $res && ! empty($_SERVER["DOCUMENT_ROOT"])) $res=@include($_SERVER["DOCUMENT_ROOT"]."/main.inc.php");
 // Try main.inc.php into web root detected using web root calculated from SCRIPT_FILENAME
 $tmp=empty($_SERVER['SCRIPT_FILENAME'])?'':$_SERVER['SCRIPT_FILENAME'];$tmp2=realpath(__FILE__); $i=strlen($tmp)-1; $j=strlen($tmp2)-1;
 while($i > 0 && $j > 0 && isset($tmp[$i]) && isset($tmp2[$j]) && $tmp[$i]==$tmp2[$j]) { $i--; $j--; }
@@ -69,8 +70,9 @@ require_once DOL_DOCUMENT_ROOT.'/societe/class/societeaccount.class.php';
 require_once DOL_DOCUMENT_ROOT.'/societe/class/companybankaccount.class.php';
 require_once DOL_DOCUMENT_ROOT.'/societe/class/companypaymentmode.class.php';
 require_once DOL_DOCUMENT_ROOT.'/core/lib/geturl.lib.php';
-dol_include_once('/sellyoursaas/class/packages.class.php');
-dol_include_once('/sellyoursaas/lib/sellyoursaas.lib.php');
+dol_include_once('./sellyoursaas/class/packages.class.php');
+dol_include_once('./sellyoursaas/lib/sellyoursaas.lib.php');
+dol_include_once('./sellyoursaas/class/sellyoursaasutils.class.php');
 
 $conf->global->SYSLOG_FILE_ONEPERSESSION=2;
 
@@ -222,6 +224,7 @@ if ($conf->global->SELLYOURSAAS_DEFAULT_RESELLER_CATEG > 0)
 	}
 }
 
+$nbtotalofrecords = 0;
 $listofcontractidresellerall = array();
 $listofcontractidreseller = array();
 $listofcustomeridreseller = array();
@@ -681,7 +684,6 @@ if ($action == 'createpaymentmode')		// Create credit card stripe
             \Stripe\Stripe::setApiKey($stripearrayofkeys['secret_key']);
 
             $setupintent = \Stripe\SetupIntent::retrieve($setupintentid);
-
             if (empty($setupintent->payment_method))        // Example: $setupintent->payment_method = 'pm_...'
             {
                 setEventMessages('Error: The payment_method is empty into the setupintentid', null, 'errors');
@@ -694,6 +696,8 @@ if ($action == 'createpaymentmode')		// Create credit card stripe
         if (! $error)
         {
             $payment_method = \Stripe\PaymentMethod::retrieve($setupintent->payment_method);
+
+            // Note: Here setupintent->customer is defined but $payment_method->customer is not yet. It will be attached later by ->attach
 
             // Ajout
             $companypaymentmode = new CompanyPaymentMode($db);
@@ -715,7 +719,7 @@ if ($action == 'createpaymentmode')		// Create credit card stripe
             $companypaymentmode->ipaddress       = getUserRemoteIP();
 
             $companypaymentmode->stripe_card_ref = $payment_method->id;
-            $companypaymentmode->stripe_account  = $stripearrayofkeys['publishable_key'];
+            $companypaymentmode->stripe_account  = $setupintent->customer.'@'.$stripearrayofkeys['publishable_key'];
             $companypaymentmode->status          = $servicestatusstripe;
 
             $companypaymentmode->card_type       = $payment_method->card->brand;
@@ -740,7 +744,8 @@ if ($action == 'createpaymentmode')		// Create credit card stripe
                     $stripe = new Stripe($db);
                     $stripeacc = $stripe->getStripeAccount($service);								// Get Stripe OAuth connect account if it exists (no remote access to Stripe here)
 
-                    // Get the Stripe customer and create if not linked (use default Stripe setup)
+                    // Get the Stripe customer (should have been created already when creating the setupintent)
+                    // Note that we should have already the customer in $setupintent->customer
                     $cu = $stripe->customerStripe($mythirdpartyaccount, $stripeacc, $servicestatusstripe, 0);
                     if (! $cu)
                     {
@@ -751,12 +756,22 @@ if ($action == 'createpaymentmode')		// Create credit card stripe
                     {
                         dol_syslog('--- Stripe customer retrieved cu = '.$cu->id);
 
-                        // Attach payment_mode from SetupIntent to customer
+                        // Attach payment_method from SetupIntent to customer
                         try {
-                            $payment_method_obj = \Stripe\PaymentMethod::retrieve($payment_method->id);
+                            //$payment_method_obj = \Stripe\PaymentMethod::retrieve($payment_method->id);
+                            $payment_method_obj = $payment_method;
+
                             if (empty($payment_method_obj->customer))
                             {
-                                $result = $payment_method_obj->attach(['customer' => $cu->id]);
+                                $arrayforattach = array(
+                                    'customer' => $cu->id,
+                                    //'metadata' => array('dol_version'=>DOL_VERSION, 'dol_entity'=>$conf->entity, 'ipaddress'=>getUserRemoteIP())
+                                );
+                                $result = $payment_method_obj->attach($arrayforattach);
+
+                                // TODO To set this payment mode as default, you must make
+                                // $arrayofparam = array('invoice_settings' => array('default_payment_method' => $payment_method_obj->id));
+                                // $cu->update($arrayofparam);
                             }
                             elseif($payment_method_obj->customer != $cu->id)
                             {
@@ -841,11 +856,9 @@ if ($action == 'createpaymentmode')		// Create credit card stripe
             {
                 dol_syslog("--- Now we search pending invoices for thirdparty to pay them (Note that it may have no pending invoice yet when contract is in trial mode)", LOG_DEBUG, 0);
 
-                dol_include_once('/sellyoursaas/class/sellyoursaasutils.class.php');
-
                 $sellyoursaasutils = new SellYourSaasUtils($db);
 
-                $result = $sellyoursaasutils->doTakePaymentStripeForThirdparty($service, $servicestatusstripe, $mythirdpartyaccount->id, $companypaymentmode, null, 1, 1, 1);	// Include draft invoices
+                $result = $sellyoursaasutils->doTakePaymentStripeForThirdparty($service, $servicestatusstripe, $mythirdpartyaccount->id, $companypaymentmode, null, 1, 1, 1, 1);	// Include draft invoices
                 if ($result != 0)
                 {
                     $error++;
@@ -867,8 +880,6 @@ if ($action == 'createpaymentmode')		// Create credit card stripe
             if (! $error)
             {
                 dol_syslog("--- Make renewals on contracts for thirdparty id=".$mythirdpartyaccount->id, LOG_DEBUG, 0);
-
-                dol_include_once('/sellyoursaas/class/sellyoursaasutils.class.php');
 
                 $sellyoursaasutils = new SellYourSaasUtils($db);
 
@@ -1179,11 +1190,9 @@ if ($action == 'createpaymentmode')		// Create credit card stripe
                         {
                             dol_syslog("--- Now we try to take payment for thirdpartyid = ".$mythirdpartyaccount->id, LOG_DEBUG, 0);	// Unsuspend if it was suspended (done by trigger BILL_CANCEL or BILL_PAYED).
 
-                            dol_include_once('/sellyoursaas/class/sellyoursaasutils.class.php');
-
                             $sellyoursaasutils = new SellYourSaasUtils($db);
 
-                            $result = $sellyoursaasutils->doTakePaymentStripeForThirdparty($service, $servicestatusstripe, $mythirdpartyaccount->id, $companypaymentmode, null, 0, 1);
+                            $result = $sellyoursaasutils->doTakePaymentStripeForThirdparty($service, $servicestatusstripe, $mythirdpartyaccount->id, $companypaymentmode, null, 0, 1, 0, 1);
                             if ($result != 0)
                             {
                                 $error++;
@@ -1213,8 +1222,6 @@ if ($action == 'createpaymentmode')		// Create credit card stripe
                         if (! $error)
                         {
                             dol_syslog("--- Now we make renewal of contracts for thirdpartyid=".$mythirdpartyaccount->id." if payments were ok and contract are not unsuspended", LOG_DEBUG, 0);
-
-                            dol_include_once('/sellyoursaas/class/sellyoursaasutils.class.php');
 
                             $sellyoursaasutils = new SellYourSaasUtils($db);
 
@@ -1318,7 +1325,7 @@ if ($action == 'createpaymentmode')		// Create credit card stripe
                                     'source_type_name' => 'API',
                                     'host'       => gethostname()
                                 )
-                                );
+                            );
                         }
                         catch(Exception $e)
                         {
@@ -1376,8 +1383,8 @@ if ($action == 'createpaymentmode')		// Create credit card stripe
     		$companypaymentmode->status          = $servicestatusstripe;
     		$companypaymentmode->comment         = 'Credit card created from customer dashboard';     // TODO Fields not declared in companypaymentmode
     		$companypaymentmode->ipaddress       = getUserRemoteIP();                                 // TODO Fields not declared in companypaymentmode
-
-    		// field $companypaymentmode->stripe_card_ref is filled later
+    		// $companypaymentmode->stripe_card_ref is filled later
+    		// $companypaymentmode->stripe_account is filled later
 
     		$db->begin();
 
@@ -1466,14 +1473,14 @@ if ($action == 'createpaymentmode')		// Create credit card stripe
 
     								$sql = "UPDATE " . MAIN_DB_PREFIX . "societe_rib";
     								$sql.= " SET stripe_card_ref = '".$db->escape($card->id)."',";
-    								$sql.= " stripe_account = '".$db->escape($stripearrayofkeys['publishable_key'])."',";
+    								$sql.= " stripe_account = '".$db->escape($cu->id.'@'.$stripearrayofkeys['publishable_key'])."',";
     								$sql.= " status = ".((int) $servicestatusstripe).",";
     								$sql.= " card_type = '".$db->escape($card->brand)."',";
     								$sql.= " country_code = '".$db->escape($card->country)."',";
     								$sql.= " exp_date_month = '".$db->escape($card->exp_month)."',";
     								$sql.= " exp_date_year = '".$db->escape($card->exp_year)."',";
     								$sql.= " last_four = '".$db->escape($card->last4)."',";
-    								//$sql.= " cvn = '".$db->escape($card->???)."',";
+    								$sql.= " ipaddress = '".$db->escape(getUserRemoteIP())."',";
     								$sql.= " approved = ".($card->cvc_check == 'pass' ? 1 : 0);
     								$sql.= " WHERE rowid = " . $companypaymentmode->id;
     								$sql.= " AND type = 'card'";
@@ -1544,11 +1551,9 @@ if ($action == 'createpaymentmode')		// Create credit card stripe
     		{
     			dol_syslog("--- Now we search pending invoices for thirdparty to pay them (Note that it may have no pending invoice yet when contract is in trial mode)", LOG_DEBUG, 0);
 
-    			dol_include_once('/sellyoursaas/class/sellyoursaasutils.class.php');
-
     			$sellyoursaasutils = new SellYourSaasUtils($db);
 
-    			$result = $sellyoursaasutils->doTakePaymentStripeForThirdparty($service, $servicestatusstripe, $mythirdpartyaccount->id, $companypaymentmode, null, 1, 1, 1);	// Include draft invoices
+    			$result = $sellyoursaasutils->doTakePaymentStripeForThirdparty($service, $servicestatusstripe, $mythirdpartyaccount->id, $companypaymentmode, null, 1, 1, 1, 1);	// Include draft invoices
     			if ($result != 0)
     			{
     				$error++;
@@ -1570,8 +1575,6 @@ if ($action == 'createpaymentmode')		// Create credit card stripe
     		if (! $error)
     		{
     			dol_syslog("--- Make renewals on crontacts for thirdparty id=".$mythirdpartyaccount->id, LOG_DEBUG, 0);
-
-    			dol_include_once('/sellyoursaas/class/sellyoursaasutils.class.php');
 
     			$sellyoursaasutils = new SellYourSaasUtils($db);
 
@@ -1889,11 +1892,9 @@ if ($action == 'createpaymentmode')		// Create credit card stripe
     					{
     						dol_syslog("--- Now we try to take payment for thirdpartyid = ".$mythirdpartyaccount->id, LOG_DEBUG, 0);	// Unsuspend if it was suspended (done by trigger BILL_CANCEL or BILL_PAYED).
 
-    						dol_include_once('/sellyoursaas/class/sellyoursaasutils.class.php');
-
     						$sellyoursaasutils = new SellYourSaasUtils($db);
 
-    						$result = $sellyoursaasutils->doTakePaymentStripeForThirdparty($service, $servicestatusstripe, $mythirdpartyaccount->id, $companypaymentmode, null, 0, 1);
+    						$result = $sellyoursaasutils->doTakePaymentStripeForThirdparty($service, $servicestatusstripe, $mythirdpartyaccount->id, $companypaymentmode, null, 0, 1, 0, 1);
     						if ($result != 0)
     						{
     							$error++;
@@ -1916,8 +1917,6 @@ if ($action == 'createpaymentmode')		// Create credit card stripe
     					if (! $error)
     					{
     						dol_syslog("--- Now we make renewal of contracts for thirdpartyid=".$mythirdpartyaccount->id." if payments were ok and contract are not unsuspended", LOG_DEBUG, 0);
-
-    						dol_include_once('/sellyoursaas/class/sellyoursaasutils.class.php');
 
     						$sellyoursaasutils = new SellYourSaasUtils($db);
 
@@ -2115,7 +2114,6 @@ if ($action == 'undeploy' || $action == 'undeployconfirmed')
 
 			if (! $error)
 			{
-				dol_include_once('/sellyoursaas/class/sellyoursaasutils.class.php');
 				$sellyoursaasutils = new SellYourSaasUtils($db);
 				$result = $sellyoursaasutils->sellyoursaasRemoteAction('suspend', $contract, 'admin', '', '', 0, $comment);
 				if ($result < 0)
@@ -2129,7 +2127,7 @@ if ($action == 'undeploy' || $action == 'undeployconfirmed')
 
 			if (! $error)
 			{
-				dol_syslog("--- Unactivate all lines of '.$contract->ref.' - undeploy process from myaccount", LOG_DEBUG, 0);
+				dol_syslog('--- Unactivate all lines of '.$contract->ref.' - undeploy process from myaccount', LOG_DEBUG, 0);
 
 				$result = $contract->closeAll($user, 1, $comment);	// Triggers disabled by call (suspend were done just before)
 				if ($result < 0)
@@ -2173,7 +2171,7 @@ if ($action == 'undeploy' || $action == 'undeployconfirmed')
 		{
 			$hash = GETPOST('hash','none');
 
-			dol_syslog("Hash received = ".$hash.' to compare to '.$stringtohash);
+			dol_syslog("Hash received = ".$hash.' to compare to hash of '.$stringtohash.' = '.dol_hash($stringtohash));
 
 			if (! dol_verifyHash($stringtohash, $hash))
 			{
@@ -2212,13 +2210,13 @@ if ($action == 'undeploy' || $action == 'undeployconfirmed')
 					}
 				}
 
-				flush();
+				// Do not use the flush here, this will return header and break the redirect later.
+				//flush();
 
 				$comment = 'Contract for '.$contract->ref.' is undeployed after a click on the undeploy confirmation request (sent by email from customer dashboard)';
 
 				if (! $error)
 				{
-					dol_include_once('/sellyoursaas/class/sellyoursaasutils.class.php');
 					$sellyoursaasutils = new SellYourSaasUtils($db);
 					$result = $sellyoursaasutils->sellyoursaasRemoteAction('undeploy', $contract, 'admin', '', '', 0, $comment, 300);
 					if ($result < 0)
@@ -2235,7 +2233,7 @@ if ($action == 'undeploy' || $action == 'undeployconfirmed')
 				// Unactivate all lines
 				if (! $error)
 				{
-					dol_syslog("--- Unactivate all lines of '.$contract->ref.' - undeployconfirmed process from myaccount", LOG_DEBUG, 0);
+					dol_syslog('--- Unactivate all lines of '.$contract->ref.' - undeployconfirmed process from myaccount', LOG_DEBUG, 0);
 
 					$result = $object->closeAll($user, 1, $comment);
 					if ($result <= 0)
@@ -2266,7 +2264,9 @@ if ($action == 'undeploy' || $action == 'undeployconfirmed')
 	//$error++;
 	if (! $error)
 	{
-		if ($action == 'undeployconfirmed')
+	    $db->commit();
+
+	    if ($action == 'undeployconfirmed')
 		{
 		    setEventMessages($langs->trans("InstanceWasUndeployedConfirmed"), null, 'warnings');
 		}
@@ -2274,8 +2274,71 @@ if ($action == 'undeploy' || $action == 'undeployconfirmed')
 		{
 			setEventMessages($langs->trans("InstanceWasUndeployed"), null, 'mesgs');
 			setEventMessages($langs->trans("InstanceWasUndeployedToConfirm"), null, 'warnings');
+
+			$tmpcontract = $contract;
+
+			if (! empty($conf->global->SELLYOURSAAS_DATADOG_ENABLED))
+			{
+			    try {
+			        dol_include_once('/sellyoursaas/core/includes/php-datadogstatsd/src/DogStatsd.php');
+
+			        $arrayconfig=array();
+			        if (! empty($conf->global->SELLYOURSAAS_DATADOG_APIKEY))
+			        {
+			            $arrayconfig=array('apiKey'=>$conf->global->SELLYOURSAAS_DATADOG_APIKEY, 'app_key' => $conf->global->SELLYOURSAAS_DATADOG_APPKEY);
+			        }
+
+			        $statsd = new DataDog\DogStatsd($arrayconfig);
+
+        			// Add flag for paying instance lost
+        			$ispaidinstance = sellyoursaasIsPaidInstance($contract);
+        			if ($ispaidinstance)
+        			{
+        				$langs->load("sellyoursaas@sellyoursaas");
+
+        		        dol_syslog("Send other metric sellyoursaas.payinginstancelost to datadog".(get_class($tmpcontract) == 'Contrat' ? ' contractid='.$tmpcontract->id.' contractref='.$tmpcontract->ref: ''));
+        		        $arraytags=null;
+        		        $statsd->increment('sellyoursaas.payinginstancelost', 1, $arraytags);
+
+        		        global $dolibarr_main_url_root;
+        		        $urlwithouturlroot=preg_replace('/'.preg_quote(DOL_URL_ROOT,'/').'$/i','',trim($dolibarr_main_url_root));
+        		        $urlwithroot=$urlwithouturlroot.DOL_URL_ROOT;		// This is to use external domain name found into config file
+        		        //$urlwithroot=DOL_MAIN_URL_ROOT;					// This is to use same domain name than current
+
+        		        //$tmpcontract->fetch_thirdparty();
+        		        $mythirdpartyaccount = $tmpcontract->thirdparty;
+
+        		        $sellyoursaasname = $conf->global->SELLYOURSAAS_NAME;
+        		        if (! empty($mythirdpartyaccount->array_options['options_domain_registration_page'])
+        		            && $mythirdpartyaccount->array_options['options_domain_registration_page'] != $conf->global->SELLYOURSAAS_MAIN_DOMAIN_NAME)
+        		        {
+        		            $newnamekey = 'SELLYOURSAAS_NAME_FORDOMAIN-'.$mythirdpartyaccount->array_options['options_domain_registration_page'];
+        		            if (! empty($conf->global->$newnamekey)) $sellyoursaasname = $conf->global->$newnamekey;
+        		        }
+
+        		        $titleofevent = dol_trunc($sellyoursaasname.' - '.gethostname().' - '.$langs->trans("PayingInstanceLost").': '.$mythirdpartyaccount->name, 90);
+        		        $messageofevent = ' - '.$langs->trans("IPAddress").' '.getUserRemoteIP()."\n";
+        		        $messageofevent.= $langs->trans("PayingInstanceLost").': '.$mythirdpartyaccount->name.' - ['.$langs->trans("SeeOnBackoffice").']('.$urlwithouturlroot.'/societe/card.php?socid='.$mythirdpartyaccount->id.')'."\n";
+        		        $messageofevent.= 'Lost after suspension of instance + recurring invoice after a destroy request.';
+
+        		        // See https://docs.datadoghq.com/api/?lang=python#post-an-event
+        		        $statsd->event($titleofevent,
+        		            array(
+        		                'text'       =>  "%%% \n ".$titleofevent.$messageofevent." \n %%%",      // Markdown text
+        		                'alert_type' => 'info',
+        		                'source_type_name' => 'API',
+        		                'host'       => gethostname()
+        		            )
+        		        );
+        			}
+			    }
+       			catch(Exception $e)
+       			{
+                    // Nothing
+       			}
+		    }
 		}
-		$db->commit();
+
 		header('Location: '.$_SERVER["PHP_SELF"].'?modes=instances&tab=resources_'.$contract->id);
 		exit;
 	}
@@ -2342,7 +2405,6 @@ if ($action == 'deleteaccount')
  */
 
 $form = new Form($db);
-$formother = new FormOther($db);
 
 if ($welcomecid > 0)
 {
@@ -3406,7 +3468,7 @@ if ($mode == 'instances')
 {
     // SERVER_NAME here is myaccount.mydomain.com (we can exploit only the part mydomain.com)
     $domainname = getDomainFromURL($_SERVER["SERVER_NAME"], 1);
-    $forcedsubdomain = GETPOST('forcesubdomain', 'alpha');
+    $forcesubdomain = GETPOST('forcesubdomain', 'alpha');
 
     // List of available plans/products
 	$arrayofplans=array();
@@ -3512,7 +3574,6 @@ if ($mode == 'instances')
 	}
 	else
 	{
-		dol_include_once('sellyoursaas/class/sellyoursaasutils.class.php');
 		$sellyoursaasutils = new SellYourSaasUtils($db);
 
 		$arrayforsort = array();
@@ -4140,7 +4201,7 @@ if ($mode == 'instances')
 					                    '.$langs->trans("PleaseBeSure", $contract->ref_customer).'
 					                </p>
 									<p class="center" style="padding-bottom: 15px">
-										<input type="text" required="required" class="center urlofinstancetodestroy" name="urlofinstancetodestroy" value="'.GETPOST('urlofinstancetodestroy','alpha').'" placeholder="" autofocus>
+										<input type="text" required="required" class="urlofinstancetodestroy" name="urlofinstancetodestroy" value="'.GETPOST('urlofinstancetodestroy','alpha').'" placeholder="'.$langs->trans("NameOfInstanceToDestroy").'" autofocus>
 									</p>';
 								}
 								print '
@@ -4389,7 +4450,6 @@ if ($mode == 'mycustomerinstances')
 	}
 	else
 	{
-		dol_include_once('sellyoursaas/class/sellyoursaasutils.class.php');
 		$sellyoursaasutils = new SellYourSaasUtils($db);
 
 		$arrayforsort = array();
@@ -5406,8 +5466,8 @@ if ($mode == 'billing')
 	            print '
 	                <br><br>
 	                <a href="'.$urltoenterpaymentmode.'" class="btn default btn-xs green-stripe">';
-	            	if ($nbpaymentmodeok) print $langs->trans("ModifyPaymentMode");
-	            	else print $langs->trans("AddAPaymentMode");
+	            	if ($nbpaymentmodeok) print $langs->trans("ModifyPaymentMode").'...';
+	            	else print $langs->trans("AddAPaymentMode").'...';
 	                print '</a>
 
 	            </p>
@@ -5460,6 +5520,74 @@ if ($mode == 'registerpaymentmode')
     	print '<input type="hidden" name="action" value="createpaymentmode">'."\n";
     	print '<input type="hidden" name="backtourl" value="'.$backtourl.'">';
     	//print '<input type="hidden" name="thirdparty_id" value="'.$mythirdpartyaccount->id.'">';
+
+    	// If thirdparty is not yet a customer, we show him the amount to pay in its first invoice.
+    	if ($mythirdpartyaccount->client != 1 && $mythirdpartyaccount->client != 3) {
+            // Loop on contracts
+    	    $amounttopayasfirstinvoice = 0;
+    	    $amounttopayasfirstinvoicetinstances = array();
+    	    foreach ($listofcontractid as $contract)
+    	    {
+    	        if ($contract->array_options['options_deployment_status'] == 'done') {
+        	        $sellyoursaasutils = new SellYourSaasUtils($db);
+
+        	        $comment = 'Refresh contract '.$contract->ref.' on the payment page to be able to show the correct amount to pay';
+        	        // First launch update of resources: This update status of install.lock+authorized key and update qty of contract lines
+        	        $result = $sellyoursaasutils->sellyoursaasRemoteAction('refresh', $contract, 'admin', '', '', '0', $comment);
+        	        $contract->fetch($contract->id);   // Reload to get new values after refresh
+
+        	        $amounttopayasfirstinvoice += $contract->total_ttc;
+        	        $amounttopayasfirstinvoicetinstances[$contract->ref_customer] = $contract;
+    	        }
+    	    }
+
+    	    // We are not yet a customer
+        	if ($amounttopayasfirstinvoice) {
+        	    print '<div class="opacitymedium firstpaymentmessage"><small>'.$langs->trans("AFirstInvoiceOfWillBeDone", price($amounttopayasfirstinvoice, 0, $langs, 1, -1, -1, $conf->currency));
+        	    if (count($amounttopayasfirstinvoicetinstances) >= 2) {    // If 2 instances
+        	        print ' (';
+        	        $i = 0;
+        	        foreach ($amounttopayasfirstinvoicetinstances as $key => $tmpcontracttopay) {
+        	            if ($i) print ', ';
+        	            print '<strong>'.$key.'</strong>: '.price($tmpcontracttopay->total_ttc, 0, $langs, 1, -1, -1, $conf->currency);
+        	            $i++;
+        	        }
+        	        print ')';
+        	    } else {
+        	        $parenthesisopen = 0;
+        	        if (count($amounttopayasfirstinvoicetinstances) == 1) {   // If 1 instance
+            	        foreach ($amounttopayasfirstinvoicetinstances as $key => $tmpcontracttopay) {
+            	            $parenthesisopen = 1;
+            	            print ' ('.$langs->trans("Instance").': <strong>'.$key.'</strong>';
+            	        }
+        	        }
+
+        	        $urlforplanprices = $conf->global->SELLYOURSAAS_PRICES_URL;
+            	    if (! empty($mythirdpartyaccount->array_options['options_domain_registration_page'])
+            	        && $mythirdpartyaccount->array_options['options_domain_registration_page'] != $conf->global->SELLYOURSAAS_MAIN_DOMAIN_NAME)
+            	    {
+            	        $newnamekey = 'SELLYOURSAAS_PRICES_URL_FORDOMAIN-'.$mythirdpartyaccount->array_options['options_domain_registration_page'];
+            	        $urlforplanprices = $conf->global->$newnamekey;
+            	    }
+
+            	    if ($urlforplanprices) {
+            	        print ' - ';
+            	        print $langs->trans("SeeOurPrices", $urlforplanprices);
+            	    }
+
+            	    if ($parenthesisopen) {
+            	        print ')';
+            	    } else {
+            	        print '.';
+            	    }
+        	    }
+        	    print '</small></div>';
+        	    print '<br><br>';
+        	} else {
+        	    print '<div class="opacitymedium firstpaymentmessage"><small>'.$langs->trans("NoInstanceYet").'</small></div>';
+        	    print '<br><br>';
+        	}
+    	}
 
     	print '
 		<div class="radio-list">
@@ -5536,12 +5664,24 @@ if ($mode == 'registerpaymentmode')
 		    $stripe = new Stripe($db);
 		    $stripeacc = $stripe->getStripeAccount($service);
 		    $stripecu = null;
-		    $stripecu = $stripe->customerStripe($mythirdpartyaccount, $stripeacc, $servicestatus, 1);
+		    $stripecu = $stripe->customerStripe($mythirdpartyaccount, $stripeacc, $servicestatus, 1); // will use $stripearrayofkeysbyenv to know which env to search into
 
 		    if (! empty($conf->global->STRIPE_USE_INTENT_WITH_AUTOMATIC_CONFIRMATION))
 		    {
 		        $setupintent=$stripe->getSetupIntent('Stripe setupintent '.$fulltag, $mythirdpartyaccount, $stripecu, $stripeacc, $servicestatus);
-		        if ($stripe->error) setEventMessages($stripe->error, null, 'errors');
+		        if ($stripe->error) {
+		            setEventMessages($stripe->error, null, 'errors');
+
+		            $emailforerror = $conf->global->SELLYOURSAAS_MAIN_EMAIL;
+		            if (! empty($mythirdpartyaccount->array_options['options_domain_registration_page'])
+		                && $mythirdpartyaccount->array_options['options_domain_registration_page'] != $conf->global->SELLYOURSAAS_MAIN_DOMAIN_NAME)
+		            {
+		                $newnamekey = 'SELLYOURSAAS_MAIN_EMAIL_FORDOMAIN-'.$mythirdpartyaccount->array_options['options_domain_registration_page'];
+		                $emailforerror = $conf->global->$newnamekey;
+		            }
+
+		            setEventMessages($langs->trans("ErrorContactEMail", $emailforerror, 'StripeCusNotFound'), null, 'errors');
+		        }
 		    }
 		}
 
@@ -5551,7 +5691,7 @@ if ($mode == 'registerpaymentmode')
 		print '</div></div>';
 
 		require_once DOL_DOCUMENT_ROOT.'/stripe/config.php';
-		// Reforce the $stripearrayofkeys because content may change depending on option
+		// Reforce the $stripearrayofkeys because content may have been changed by the include of config.php
 		if (empty($conf->global->STRIPE_LIVE) || GETPOST('forcesandbox','alpha') || ! empty($conf->global->SELLYOURSAAS_FORCE_STRIPE_TEST))
 		{
 			$stripearrayofkeys = $stripearrayofkeysbyenv[0];	// Test
@@ -6431,8 +6571,26 @@ if ($mode == 'support')
 	<!-- END PAGE HEAD -->
 	<!-- END PAGE HEADER-->';
 
+    $sellyoursaassupporturl = $conf->global->SELLYOURSAAS_SUPPORT_URL;
+    if (! empty($mythirdpartyaccount->array_options['options_domain_registration_page'])
+        && $mythirdpartyaccount->array_options['options_domain_registration_page'] != $conf->global->SELLYOURSAAS_MAIN_DOMAIN_NAME)
+    {
+        $newnamekey = 'SELLYOURSAAS_SUPPORT_URL-'.$mythirdpartyaccount->array_options['options_domain_registration_page'];
+        if (! empty($conf->global->$newnamekey)) $sellyoursaassupporturl = $conf->global->$newnamekey;
+    }
 
-	print '
+	if ($sellyoursaassupporturl) {
+	    $sellyoursaassupporturl = str_replace('__EMAIL__', $mythirdpartyaccount->email, $sellyoursaassupporturl);
+	    $sellyoursaassupporturl = str_replace('__FIRSTNAME__', $mythirdpartyaccount->array_options['options_firstname'], $sellyoursaassupporturl);
+	    $sellyoursaassupporturl = str_replace('__LASTNAME__', $mythirdpartyaccount->array_options['options_lastname'], $sellyoursaassupporturl);
+
+		print '<div class="row" id="supporturl"><div class="col-md-12"><div class="portlet light">';
+		print $langs->trans("SupportURLExternal", $sellyoursaassupporturl).'<br />'."\n";
+		print '</div></div></div>';
+
+	} else {
+
+		print '
 			    <div class="row" id="choosechannel">
 			      <div class="col-md-12">
 
@@ -6623,8 +6781,9 @@ if ($mode == 'support')
 
 			    </div> <!-- END ROW -->
 			';
+	}
 
-	if ($action != 'presend')
+	if (empty($sellyoursaassupporturl) && $action != 'presend')
 	{
 		print '
 				<!-- BEGIN PAGE HEADER-->
@@ -6864,7 +7023,9 @@ if ($mode == 'myaccount')
                 <div class="form-group">
                   <label>'.$langs->trans("Country").'</label><br>';
 				$countryselected = (GETPOSTISSET('country_id')?GETPOST('country_id','aZ09'):$mythirdpartyaccount->country_id);
-				print $form->select_country($countryselected, 'country_id', '', 0, 'minwidth300', 'code2', 0, 1);
+				$exclude_country_code = array();
+				if (! empty($conf->global->SELLYOURSAAS_EXCLUDE_COUNTRY_CODES)) $exclude_country_code = explode(',', $conf->global->SELLYOURSAAS_EXCLUDE_COUNTRY_CODES);
+				print $form->select_country($countryselected, 'country_id', '', 0, 'minwidth300', 'code2', 0, 1, 0, $exclude_country_code);
 				print '
                 </div>
                 <div class="form-group">
@@ -7014,8 +7175,21 @@ if ($mode == 'myaccount')
 	        </div>
 
 
-
 			';
+
+
+			if (! GETPOST('deleteaccount')) {
+			    print '<div class="center"><br>';
+			    $urltoenterpaymentmode = $_SERVER["PHP_SELF"].'?mode=registerpaymentmode&backtourl='.urlencode($_SERVER["PHP_SELF"].'?mode='.$mode);
+			    print '<a href="'.$urltoenterpaymentmode.'" class="">';
+            	if ($nbpaymentmodeok) print $langs->trans("ModifyPaymentMode").'...';
+            	else print $langs->trans("AddAPaymentMode").'...';
+                print '</a>';
+	            print '<br>';
+	            print '</div>';
+			}
+
+
 			if (! GETPOST('deleteaccount')) print '<div class="center"><br><a href="#deletemyaccountarea" class="deletemyaccountclick">'.$langs->trans("DeleteMyAccount").'...<br><br></a></div>';
 
 			print '
@@ -7059,7 +7233,7 @@ if ($mode == 'myaccount')
 					                    print '
 						                </p>
 										<p class="center" style="padding-bottom: 15px">
-											<input type="text" class="center urlofinstancetodestroy" name="accounttodestroy" value="'.GETPOST('accounttodestroy','alpha').'" placeholder="">
+											<input type="text" class="urlofinstancetodestroy" name="accounttodestroy" value="'.GETPOST('accounttodestroy','alpha').'" placeholder="'.$langs->trans("EmailOfAccountToDestroy").'" autofocus>
 										</p>
 										<p class="center">
 											<input type="hidden" name="mode" value="myaccount"/>

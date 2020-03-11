@@ -78,9 +78,11 @@
 #SSLCertificateFile /etc/apache2/__webSSLCertificateCRT__
 #SSLCertificateKeyFile /etc/apache2/__webSSLCertificateKEY__
 #SSLCertificateChainFile /etc/apache2/__webSSLCertificateIntermediate__
+#SSLCACertificateFile /etc/apache2/__webSSLCertificateIntermediate__
 
 SSLCertificateFile /etc/ssl/certs/saas1.doliondemand.fr.crt
 SSLCertificateKeyFile /etc/ssl/private/saas1.doliondemand.fr.key
 SSLCertificateChainFile /etc/ssl/certs/saas1.doliondemand.fr-intermediate.crt
+SSLCACertificateFile /etc/ssl/certs/saas1.doliondemand.fr-intermediate.crt
 
 </VirtualHost>

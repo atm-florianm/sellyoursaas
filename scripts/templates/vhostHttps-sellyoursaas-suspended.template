@@ -22,7 +22,7 @@
         # Possible values include: debug, info, notice, warn, error, crit, alert, emerg.
         LogLevel info
 
-        ErrorLog __osUserPath__/__webAppLogName___error.log
+        ErrorLog /var/log/apache2/apache_sellyoursaas_suspended_error.log
         #TransferLog /var/log/apache2/__webAppLogName___access_log
 
         ServerSignature On
@@ -53,9 +53,12 @@
         #   Enable/Disable SSL for this virtual host.
         SSLEngine on
 
-        RewriteEngine   on
-        RewriteRule     ^(.*)$ __webMyAccount__/suspended.php?instance=%{SERVER_NAME} [L,R]
 
+        RewriteEngine   on
+        # This will enable the Rewrite capabilities
+        
+        RewriteRule     ^(.*)$ __webMyAccount__/suspended.php?instance=%{SERVER_NAME} [L,R]
+		# This redirect to the suspended page
 
         <FilesMatch "\.(cgi|shtml|phtml|php)$">
                 SSLOptions +StdEnvVars
@@ -68,10 +71,12 @@
 #SSLCertificateFile /etc/apache2/__webSSLCertificateCRT__
 #SSLCertificateKeyFile /etc/apache2/__webSSLCertificateKEY__
 #SSLCertificateChainFile /etc/apache2/__webSSLCertificateIntermediate__
+#SSLCACertificateFile /etc/apache2/__webSSLCertificateIntermediate__
 
 SSLCertificateFile /etc/ssl/certs/saas1.doliondemand.fr.crt
 SSLCertificateKeyFile /etc/ssl/private/saas1.doliondemand.fr.key
 SSLCertificateChainFile /etc/ssl/certs/saas1.doliondemand.fr-intermediate.crt
+SSLCACertificateFile /etc/ssl/certs/saas1.doliondemand.fr-intermediate.crt
 
 </VirtualHost>
 

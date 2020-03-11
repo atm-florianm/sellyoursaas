@@ -144,7 +144,7 @@ do
 done
 
 
-echo "***** Get list of databases of all instances and save into /tmp/instancefound-dbinsellyoursaas"
+echo "***** Get list of databases of all instances and save it into /tmp/instancefound-dbinsellyoursaas"
 
 echo "#url=ref_customer	username_os	database_db status" > /tmp/instancefound-dbinsellyoursaas
 
@@ -160,7 +160,7 @@ if [ "x$?" != "x0" ]; then
 fi
 
 
-echo "***** Get list of databases of known active instances and save into /tmp/instancefound-activedbinsellyoursaas"
+echo "***** Get list of databases of known active instances and save it into /tmp/instancefound-activedbinsellyoursaas"
 
 echo "#url=ref_customer	username_os	database_db status" > /tmp/instancefound-activedbinsellyoursaas
 
@@ -176,14 +176,14 @@ if [ "x$?" != "x0" ]; then
 fi
 
 
-echo "***** Get list of databases available in mysql and save into /tmp/instancefound-dbinmysqldic"
+echo "***** Get list of databases available in mysql local and save it into /tmp/instancefound-dbinmysqldic"
 
 Q1="use mysql; "
 Q2="SHOW DATABASES; ";
 SQL="${Q1}${Q2}"
 
-echo "$MYSQL -usellyoursaas -pxxxxxx -h $databasehost -e '$SQL' | grep 'dbn' "
-$MYSQL -usellyoursaas -p$passsellyoursaas -h $databasehost -e "$SQL" | grep 'dbn' | awk ' { print $1 } ' >> /tmp/instancefound-dbinmysqldic
+echo "$MYSQL -usellyoursaas -pxxxxxx -h localhost -e '$SQL' | grep 'dbn' "
+$MYSQL -usellyoursaas -p$passsellyoursaas -h localhost -e "$mysql" | grep 'dbn' | awk ' { print $1 } ' >> /tmp/instancefound-dbinmysqldic
 if [ "x$?" != "x0" ]; then
 	echo "Failed to make third SQL request to get instances. Exit 1."
 	exit 1
@@ -220,6 +220,7 @@ while read bidon osusername dbname deploymentstatus ipserverdeployment; do
 		#echo notfoundip=$notfoundip
 
 		if [[ $notfoundip == 0 ]]; then
+		    # The current line of instancefound-activedbinsellyoursaas is for an instance with files deployed on this server
 	    	id $osusername >/dev/null 2>/dev/null
 	    	if [[ "x$?" == "x1" ]]; then
 				echo Line $bidon $osusername $dbname $deploymentstatus $ipserverdeployment is for a user on this server that does not exists. Should not happen.
@@ -245,7 +246,7 @@ done < /tmp/instancefound-activedbinsellyoursaas
 
 
 
-echo "***** Save osu unix account for $IPSERVERDEPLOYMENT with very old undeployed database into /tmp/osutoclean-oldundeployed and search entries with existing home dir and without dbn* subdir, and save into /tmp/osutoclean" 
+echo "***** Save osu unix account for $IPSERVERDEPLOYMENT with very old undeployed database into /tmp/osutoclean-oldundeployed and search entries with existing home dir and without dbn* subdir, and save it into /tmp/osutoclean" 
 Q1="use $database; "
 Q2="SELECT ce.username_os FROM llx_contrat as c, llx_contrat_extrafields as ce WHERE c.rowid = ce.fk_object AND ce.deployment_host = '$IPSERVERDEPLOYMENT' AND c.rowid IN ";
 Q3=" (SELECT fk_contrat FROM llx_contratdet as cd, llx_contrat_extrafields as ce2 WHERE cd.fk_contrat = ce2.fk_object AND cd.STATUT = 5 AND ce2.deployment_status = 'undeployed' AND ce2.undeployment_date < ADDDATE(NOW(), INTERVAL -1 MONTH)); ";
@@ -293,8 +294,8 @@ if [ -s /tmp/osutoclean ]; then
 			if [[ "x$dbname" != "xNULL" ]]; then	
 				echo "Do a dump of database $dbname - may fails if already removed"
 				mkdir -p $archivedirtest/$osusername
-				echo "$MYSQLDUMP -usellyoursaas -pxxxxxx -h $databasehostdeployment $dbname | bzip2 > $archivedirtest/$osusername/dump.$dbname.$now.sql.bz2"
-				$MYSQLDUMP -usellyoursaas -p$passsellyoursaas -h $databasehostdeployment $dbname | bzip2 > $archivedirtest/$osusername/dump.$dbname.$now.sql.bz2
+				echo "$MYSQLDUMP -usellyoursaas -pxxxxxx -h $databasehostdeployment $dbname | gzip > $archivedirtest/$osusername/dump.$dbname.$now.sql.tgz"
+				$MYSQLDUMP -usellyoursaas -p$passsellyoursaas -h $databasehostdeployment $dbname | gzip > $archivedirtest/$osusername/dump.$dbname.$now.sql.tgz
 
 				echo "Now drop the database"
 				echo "echo 'DROP DATABASE $dbname;' | $MYSQL -usellyoursaas -p$passsellyoursaas -h $databasehostdeployment $dbname"
@@ -490,6 +491,11 @@ find $archivedirbind -maxdepth 1 -type f -mtime +15 -exec rm -f {} \;
 echo "***** Now clean also old files in $archivedircron - 15 days after being archived"
 cd $archivedircron
 find $archivedircron -maxdepth 1 -type f -mtime +15 -exec rm -f {} \;
+
+# Now clean miscellaneous files
+echo "***** Now clean miscellaneous files"
+rm /var/log/repair.lock > /dev/null 2>&1
+
 
 echo
 echo TODO Manually...
