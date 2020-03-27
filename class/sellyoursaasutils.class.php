@@ -745,10 +745,11 @@ class SellYourSaasUtils
      * Loop on invoice for customer with default payment mode Stripe and take payment/send email. Unsuspend if it was suspended (done by trigger BILL_CANCEL or BILL_PAYED).
      * CAN BE A CRON TASK
      *
-     * @param	int		    $maxnbofinvoicetotry      Max number of payment to do (0 = No max)
-     * @return	int			                         0 if OK, <>0 if KO (this function is used also by cron so only 0 is OK)
+     * @param	int		$maxnbofinvoicetotry    		Max number of payment to do (0 = No max)
+     * @param	int		$noemailtocustomeriferror		1=No email sent to customer if there is a payment error (can be used when error is already reported on screen)
+     * @return	int			                    		0 if OK, <>0 if KO (this function is used also by cron so only 0 is OK)
      */
-     public function doTakePaymentStripe($maxnbofinvoicetotry = 0)
+    public function doTakePaymentStripe($maxnbofinvoicetotry = 0, $noemailtocustomeriferror = 0)
     {
     	global $conf, $langs, $mysoc;
 
@@ -785,7 +786,7 @@ class SellYourSaasUtils
    			$servicestatus = 1;
     	}
 
-    	dol_syslog(__METHOD__, LOG_DEBUG);
+    	dol_syslog(__METHOD__." maxnbofinvoicetotry=".$maxnbofinvoicetotry." noemailtocustomeriferror=".$noemailtocustomeriferror, LOG_DEBUG);
 
     	$this->db->begin();
 
@@ -827,7 +828,7 @@ class SellYourSaasUtils
     				{
     					dol_syslog("* Process invoice id=".$invoice->id." ref=".$invoice->ref);
 
-    					$result = $this->doTakePaymentStripeForThirdparty($service, $servicestatus, $obj->socid, $companypaymentmode, $invoice, 0);
+    					$result = $this->doTakePaymentStripeForThirdparty($service, $servicestatus, $obj->socid, $companypaymentmode, $invoice, 0, $noemailtocustomeriferror);
 						if ($result == 0)	// No error
 						{
 							$invoiceprocessedok[$obj->rowid]=$invoice->ref;
@@ -888,7 +889,7 @@ class SellYourSaasUtils
 
     	$langs->load("agenda");
 
-    	dol_syslog("doTakePaymentStripeForThirdparty service=".$service." servicestatus=".$servicestatus." thirdparty_id=".$thirdparty_id." companypaymentmode=".$companypaymentmode->id);
+    	dol_syslog("doTakePaymentStripeForThirdparty service=".$service." servicestatus=".$servicestatus." thirdparty_id=".$thirdparty_id." companypaymentmode=".$companypaymentmode->id." noemailtocustomeriferror=".$noemailtocustomeriferror." nocancelifpaymenterror=".$nocancelifpaymenterror." calledinmyaccountcontext=".$calledinmyaccountcontext);
 
     	$this->stripechargedone = 0;
     	$this->stripechargeerror = 0;
@@ -1206,7 +1207,7 @@ class SellYourSaasUtils
 
 	    							$error++;
 	    							$errorforinvoice++;
-	    							$errmsg=$langs->trans("FailedtoChargeCard");
+	    							$errmsg=$langs->trans("FailedToChargeCard");
 	    							if (! empty($charge))
 	    							{
 	    							    if ($stripefailuredeclinecode == 'authentication_required')
@@ -1597,9 +1598,11 @@ class SellYourSaasUtils
      * Loop on invoice for customer with default payment mode Paypal and take payment. Unsuspend if it was suspended.
      * CAN BE A CRON TASK
      *
-     * @return	int			0 if OK, <>0 if KO (this function is used also by cron so only 0 is OK)
+     * @param	int		$maxnbofinvoicetotry    	Max number of payment to do (0 = No max)
+     * @param	int		$noemailtocustomeriferror	1=No email sent to customer if there is a payment error (can be used when error is already reported on screen)
+     * @return	int									0 if OK, <>0 if KO (this function is used also by cron so only 0 is OK)
      */
-    public function doTakePaymentPaypal()
+    public function doTakePaymentPaypal($maxnbofinvoicetotry = 0, $noemailtocustomeriferror = 0)
     {
     	global $conf, $langs;
 

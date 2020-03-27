@@ -1065,7 +1065,8 @@ et l'email à utiliser qui est officiellement valide.
 [source,bash]
 ---------------
 root@myshortservername.mysaasdomain.com		noreply@mysaasdomain.com
-root@myshortservername.locadomain          noreply@mysaasdomain.com
+root@myshortservername.locadomain			noreply@mysaasdomain.com
+admin@myshortservername.mysaasdomain.com	noreply@mysaasdomain.com
 ---------------
 
 Compiler le fichier par:
@@ -1881,16 +1882,26 @@ shutdown -Fr now
 ---------------
 
 
+=== Configuration de PHP
 
-=== Securisation du répertoire des sessions PHP
+==== Securisation du répertoire des sessions PHP
 
 Mettre les droits en *drwx-wx-wt* sur le répertoire des sessions php */dev/shm/* et/ou */var/lib/php*
 
 
+==== Définition taille upload
+
+Modifier le fichier *php.ini* pour permettre l'upload de plus gros fichiers.
+
+[source,bash]
+---------------
+upload_max_filesize = 20M
+
+post_max_size = 25M
+---------------
 
 
-
-=== Ajout du wrapper PHP pour la fonction PHP mail
+==== Ajout du wrapper PHP pour la fonction PHP mail
 
 Le wrapper PHP d'envoi de mail permet d'intercepter tout mail envoyé avec PHP (afin de faire une analyse antiSpam et d'intégrer une log qui pourra être exploiter par fail2ban) avant d'envoyer le mail réellement.
 
@@ -2000,7 +2011,18 @@ SystemMaxUse=100M
 ---------------
 
 
-=== Désactivation de apport (optionnel)
+=== Désactivation ou activation de apport (optionnel, "on" recommandé)
+
+Pour activer:
+
+[source,bash]
+---------------
+sudo systemctl enable apport.service
+sudo systemctl start apport.service
+sudo systemctl status apport.service
+---------------
+
+Pour désactiver:
 
 [source,bash]
 ---------------
@@ -2009,6 +2031,7 @@ sudo systemctl stop apport.service
 sudo systemctl status apport.service
 ---------------
 
+Note: Les rapports sont dans */var/crash*
 
 
 === Installer certbot (pour le SSL des sites hors instances utilisateurs)
@@ -2186,7 +2209,7 @@ Sur tous les serveurs (Master et Déploiement):
 
 TODO Description de la page de setup.
 
-* Créer un fichier */etc/sellyoursaas.conf* sur le serveur (sur le serveur Master et les serveurs de Déploiement)
+* Créer un fichier */etc/sellyoursaas.conf* sur le serveur (sur le serveur *Master* et les *Serveurs de Déploiement*)
 
 [source,bash]
 ---------------

@@ -110,7 +110,7 @@ $MAXINSTANCEVIGNETTE = 4;
 $limit = GETPOST('limit', 'int')?GETPOST('limit', 'int'):($mode == 'instance' ? $MAXINSTANCEVIGNETTE : 20);
 $sortfield = GETPOST('sortfield', 'alphanohtml');
 $sortorder = GETPOST('sortorder', 'alphanohtml');
-$page = GETPOST('page', 'int');
+$page = GETPOSTISSET('pageplusone') ? (GETPOST('pageplusone') - 1) : GETPOST("page", 'int');
 if (empty($page) || $page == -1) { $page = 0; }     // If $page is not defined, or '' or -1
 $offset = $limit * $page;
 $pageprev = $page - 1;
@@ -3057,10 +3057,14 @@ if (empty($welcomecid))
 				$delayindays = round($delayafterexpiration / 3600 / 24);
 				$delaybeforeundeployment = max(0, ($atleastonepaymentmode ? $conf->global->SELLYOURSAAS_NBDAYS_AFTER_EXPIRATION_BEFORE_PAID_UNDEPLOYMENT : $conf->global->SELLYOURSAAS_NBDAYS_AFTER_EXPIRATION_BEFORE_TRIAL_UNDEPLOYMENT) - $delayindays);
 
-				print '<!-- XDaysAfterEndOfPeriodInstanceSuspended -->'."\n";
+				print '<!-- XDaysAfterEndOfPeriodInstanceSuspended '.$delayindays.' -->'."\n";
 				print '<div class="note note-warning">'."\n";
 				print '		<h4 class="block">'."\n";
-				print $langs->trans("XDaysAfterEndOfPeriodInstanceSuspended", $contract->ref_customer, abs($delayindays), $delaybeforeundeployment);
+				if ($delayindays >= 0) {
+					print $langs->trans("XDaysAfterEndOfPeriodInstanceSuspended", $contract->ref_customer, abs($delayindays), $delaybeforeundeployment);
+				} else {
+					print $langs->trans("BeforeEndOfPeriodInstanceSuspended", $contract->ref_customer, $delaybeforeundeployment);
+				}
 				if (empty($atleastonepaymentmode))
 				{
 				    print '<br><a href="'.$_SERVER["PHP_SELF"].'?mode=registerpaymentmode&backtourl='.urlencode($_SERVER["PHP_SELF"].'?mode='.$mode).'">'.$langs->trans("AddAPaymentModeToRestoreInstance").'</a>';
@@ -5241,8 +5245,8 @@ if ($mode == 'billing')
 									$amount_credit_notes_included = $invoice->getSumCreditNotesUsed();
 									$paymentinerroronthisinvoice = 0;
 
-									// Test if there is a payment error, if yes, ask to fix payment data
-									$sql = 'SELECT f.rowid, ee.code, ee.label, ee.extraparams  FROM '.MAIN_DB_PREFIX.'facture as f';
+									// Test if there is a payment error (if last event is payment error). If yes, ask to fix payment data
+									$sql = 'SELECT f.rowid, ee.code, ee.label, ee.extraparams, ee.datep  FROM '.MAIN_DB_PREFIX.'facture as f';
 									$sql.= ' INNER JOIN '.MAIN_DB_PREFIX."actioncomm as ee ON ee.fk_element = f.rowid AND ee.elementtype = 'invoice'";
 									$sql.= " AND (ee.code LIKE 'AC_PAYMENT_%_KO' OR ee.label = 'Cancellation of payment by the bank')";
 									$sql.= ' WHERE f.fk_soc = '.$mythirdpartyaccount->id.' AND f.paye = 0 AND f.rowid = '.$invoice->id;
@@ -5260,17 +5264,18 @@ if ($mode == 'billing')
 											$obj = $db->fetch_object($resql);
 
 											// There is at least one payment error
+											$lasttrystring = $langs->trans("LastTry").': '.dol_print_date($db->jdate($obj->datep));
 											if ($obj->label == 'Cancellation of payment by the bank')
 											{
-											    print '<span title="'.$langs->trans("PaymentChargedButReversedByBank").'"><img src="'.DOL_URL_ROOT.'/theme/eldy/img/statut8.png"> '.$langs->trans("PaymentError").'</span>';
+												print '<span title="'.$langs->trans("PaymentChargedButReversedByBank").' - '.$lasttrystring.'"><img src="'.DOL_URL_ROOT.'/theme/eldy/img/statut8.png"> '.$langs->trans("PaymentError").'</span>';
 											}
 											elseif ($obj->extraparams == 'PAYMENT_ERROR_INSUFICIENT_FUNDS')
 											{
-											    print '<span title="'.$obj->extraparams.'"><img src="'.DOL_URL_ROOT.'/theme/eldy/img/statut8.png" alt="Insuficient funds"> '.$langs->trans("PaymentError").'</span>';
+												print '<span title="'.$obj->extraparams.' - '.$lasttrystring.'"><img src="'.DOL_URL_ROOT.'/theme/eldy/img/statut8.png" alt="Insuficient funds"> '.$langs->trans("PaymentError").'</span>';
 											}
 											else
 											{
-											    print '<span title="'.$obj->extraparams.'"><img src="'.DOL_URL_ROOT.'/theme/eldy/img/statut8.png"> '.$langs->trans("PaymentError").'</span>';
+												print '<span title="'.$obj->extraparams.' - '.$lasttrystring.'"><img src="'.DOL_URL_ROOT.'/theme/eldy/img/statut8.png"> '.$langs->trans("PaymentError").'</span>';
 											}
 										}
 									}
@@ -5280,6 +5285,9 @@ if ($mode == 'billing')
 										$s = preg_replace('/'.$langs->trans("BillStatusPaidBackOrConverted").'/', $langs->trans("Refunded"), $s);
 										$s = preg_replace('/'.$langs->trans("BillShortStatusPaidBackOrConverted").'/', $langs->trans("Refunded"), $s);
 										print $s;
+										// TODO Add details of payments
+										//$htmltext = 'Soon here: Details of payment...';
+										//print $form->textwithpicto('', $htmltext);
 									}
 									print '
 					              </div>
@@ -5521,8 +5529,12 @@ if ($mode == 'registerpaymentmode')
     	print '<input type="hidden" name="backtourl" value="'.$backtourl.'">';
     	//print '<input type="hidden" name="thirdparty_id" value="'.$mythirdpartyaccount->id.'">';
 
-    	// If thirdparty is not yet a customer, we show him the amount to pay in its first invoice.
-    	if ($mythirdpartyaccount->client != 1 && $mythirdpartyaccount->client != 3) {
+    	$tmp = $mythirdpartyaccount->getOutstandingBills();
+    	$outstandingTotalIncTax = $tmp['total_ttc'];
+
+    	// If thirdparty is not yet a customer (no payment never done), we show him the amount to pay in its first invoice.
+    	if ($outstandingTotalIncTax == 0) {
+
             // Loop on contracts
     	    $amounttopayasfirstinvoice = 0;
     	    $amounttopayasfirstinvoicetinstances = array();
@@ -5623,7 +5635,7 @@ if ($mode == 'registerpaymentmode')
 			{
 				$foundcard++;
 				print '<hr>';
-				print img_credit_card($companypaymentmodetemp->type_card);
+				print img_credit_card($companypaymentmodetemp->type_card, 'marginrightonlyimp');
 				print $langs->trans("CurrentCreditOrDebitCard").':<br>';
 				print '<!-- companypaymentmode id = '.$companypaymentmodetemp->id.' -->';
 				print '....'.$companypaymentmodetemp->last_four;
@@ -5641,7 +5653,7 @@ if ($mode == 'registerpaymentmode')
 		if ($foundcard)
 		{
 			print '<hr>';
-			print img_credit_card($companypaymentmodetemp->type_card);
+			print img_credit_card($companypaymentmodetemp->type_card, 'marginrightonlyimp');
 			print $langs->trans("NewCreditOrDebitCard").':<br>';
 		}
 

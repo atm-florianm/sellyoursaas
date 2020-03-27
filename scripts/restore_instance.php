@@ -128,7 +128,7 @@ if (empty($db)) $db=$dbmaster;
 if (empty($dirroot) || empty($instance) || empty($mode))
 {
     print "This script must be ran as 'admin' user.\n";
-    print "Usage:   $script_file backup_dir  instance  mysqldump_dbn...sql.bz2|dayofmysqldump  [testrsync|testdatabase|test|confirmrsync|confirmdatabase|confirm]\n";
+    print "Usage:   $script_file backup_dir  instance  mysqldump_dbn...sql.gz|dayofmysqldump  [testrsync|testdatabase|test|confirmrsync|confirmdatabase|confirm]\n";
 	print "Example: $script_file ".$conf->global->DOLICLOUD_BACKUP_PATH."/osu123456/dbn789012  myinstance  31  testrsync\n";
 	print "Note:    ssh keys must be authorized to have testrsync and confirmrsync working\n";
 	print "Return code: 0 if success, <>0 if error\n";
@@ -309,7 +309,7 @@ if ($mode == 'testrsync' || $mode == 'test' || $mode == 'confirmrsync' || $mode 
 	}
 }
 
-// Backup database
+// Restore database
 if ($mode == 'testdatabase' || $mode == 'test' || $mode == 'confirmdatabase' || $mode == 'confirm')
 {
 	$command="mysql";
@@ -325,16 +325,20 @@ if ($mode == 'testdatabase' || $mode == 'test' || $mode == 'confirmdatabase' || 
 	if (is_numeric($dayofmysqldump))
 	{
 	    $dateselected=sprintf("%02s", $dayofmysqldump);
-	    $dumpfiletoload='mysqldump_'.$object->database_db.'_'.$dateselected.".sql.bz2";
+	    $dumpfiletoload='mysqldump_'.$object->database_db.'_'.$dateselected.".sql.gz";
 	}
 	else
 	{
 	    $dumpfiletoload=$dayofmysqldump;
 	}
 
+	// TODO
+	// Drop table to avoid error on load due to foreign keys
+
+	// Launch load
 	$fullcommand=$command." ".join(" ",$param);
-	if ($mode != 'confirm' && $mode != 'confirmdatabase') $fullcommand='cat '.$dirroot.'/../'.$dumpfiletoload.' | bzip2 -d > /dev/null';
-	else $fullcommand='cat '.$dirroot.'/../'.$dumpfiletoload.' | bzip2 -d | '.$fullcommand;
+	if ($mode != 'confirm' && $mode != 'confirmdatabase') $fullcommand='cat '.$dirroot.'/../'.$dumpfiletoload.' | gzip -d > /dev/null';
+	else $fullcommand='cat '.$dirroot.'/../'.$dumpfiletoload.' | gzip -d | '.$fullcommand;
 	$output=array();
 	$return_varmysql=0;
 	print strftime("%Y%m%d-%H%M%S").' '.$fullcommand."\n";
@@ -353,7 +357,8 @@ if ($mode == 'testdatabase' || $mode == 'test' || $mode == 'confirmdatabase' || 
 		$handle=fopen($dirroot.'/../last_mysqlrestore_'.$instance.'.txt','w');
 		if ($handle)
 		{
-			fwrite($handle,'File created after mysql of '.$instance.". return_varmysql=".$return_varmysql."\n");
+			fwrite($handle,'File created after mysql load into '.$instance.". return_varmysql=".$return_varmysql."\n");
+			fwrite($handle,'The dump file restored was: '.$dirroot.'/../'.$dumpfiletoload."\n");
 			fclose($handle);
 		}
 		else
@@ -403,8 +408,8 @@ if (empty($return_var) && empty($return_varmysql))
 }
 else
 {
-	if (! empty($return_var))      print "ERROR into backup process of rsync: ".$return_var."\n";
-	if (! empty($return_varmysql)) print "ERROR into backup process of mysqldump: ".$return_varmysql."\n";
+	if (! empty($return_var))      print "ERROR into restore process of rsync: ".$return_var."\n";
+	if (! empty($return_varmysql)) print "ERROR into restore process of mysqldump: ".$return_varmysql."\n";
 
 	if ($mode == 'confirm')
 	{
