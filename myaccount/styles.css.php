@@ -37,7 +37,8 @@ if (empty($dolibarr_nocache)) header('Cache-Control: max-age=3600, public, must-
 else header('Cache-Control: no-cache');
 
 
-print "/* CSS content (all pages) */
+?>
+/* CSS content (all pages) */
 body.bodywebsite { margin: 0; }
 .centpercent { width: 100%; }
 .floatleft { float: left; }
@@ -259,7 +260,7 @@ margin-top: 25px;
 div#waitMask {
 text-align: center;
 z-index: 999;
-position: absolute;
+position: fixed;
 top: 0;
 right: 0;
 height: 100%;
@@ -326,5 +327,3 @@ border-radius: 0 4px 4px 0;
     text-align: justify;
     opacity: 0.5;
 }
-
-";
