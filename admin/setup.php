@@ -92,6 +92,8 @@ if ($action == 'set')
 
 		dolibarr_set_const($db,"SELLYOURSAAS_DEFAULT_CUSTOMER_CATEG",GETPOST("SELLYOURSAAS_DEFAULT_CUSTOMER_CATEG"),'chaine',0,'',$conf->entity);
 
+		dolibarr_set_const($db,"SELLYOURSAAS_DISABLE_SUPPORT",GETPOST("SELLYOURSAAS_DISABLE_SUPPORT",'none'),'chaine',0,'',$conf->entity);
+
 		dolibarr_set_const($db,"SELLYOURSAAS_ALLOW_RESELLER_PROGRAM",GETPOST("SELLYOURSAAS_ALLOW_RESELLER_PROGRAM"),'chaine',0,'',$conf->entity);
 		dolibarr_set_const($db,"SELLYOURSAAS_DEFAULT_COMMISSION",GETPOST("SELLYOURSAAS_DEFAULT_COMMISSION"),'chaine',0,'',$conf->entity);
 		dolibarr_set_const($db,"SELLYOURSAAS_DEFAULT_RESELLER_CATEG",GETPOST("SELLYOURSAAS_DEFAULT_RESELLER_CATEG"),'chaine',0,'',$conf->entity);
@@ -434,6 +436,13 @@ if ($allowresellerprogram)
     print '<td>25</td>';
     print '</tr>';
 }
+
+print '<tr class="oddeven"><td>'.$langs->trans("SELLYOURSAAS_ENABLE_SUPPORT").'</td>';
+print '<td>';
+print $form->selectyesno('SELLYOURSAAS_ENABLE_SUPPORT', $conf->global->SELLYOURSAAS_ENABLE_SUPPORT, 1);
+print '</td>';
+print '<td>Set it to “yes” if you want to enable users to open tickets</td>';
+print '</tr>';
 
 print '<tr class="oddeven"><td>'.$langs->trans("RefsUrl", DOL_DOCUMENT_ROOT.'/sellyoursaas/git');
 print '</td>';

@@ -2534,11 +2534,13 @@ print '
 			</li>';
 		}
 
-        print '<li class="nav-item'.($mode == 'support'?' active':'').' dropdown">
+		if (!empty($conf->global->SELLYOURSAAS_ENABLE_SUPPORT)) {
+			print '<li class="nav-item'.($mode == 'support'?' active':'').' dropdown">
             <a class="nav-link dropdown-toggle" data-toggle="dropdown" href="#"><i class="fa fa-gear"></i> '.$langs->trans("Other").'</a>
             <ul class="dropdown-menu">
 	            <li><a class="dropdown-item" href="'.$_SERVER["PHP_SELF"].'?mode=support">'.$langs->trans("Support").'</a></li>
 			';
+		}
         if (! $mythirdpartyaccount->isareseller)
         {
             $allowresellerprogram = (! empty($conf->global->SELLYOURSAAS_ALLOW_RESELLER_PROGRAM));
@@ -3406,49 +3408,50 @@ if ($mode == 'dashboard')
 	        </div> <!-- END PORTLET -->
 	      </div><!-- END COL -->
 
-
+'; if (!empty($conf->global->SELLYOURSAAS_ENABLE_SUPPORT)) {
+	print '
 			<!-- Box of tickets -->
 	      <div class="col-md-6">
 	        <div class="portlet light" id="boxOfTickets">
 
 	          <div class="portlet-title">
 	            <div class="caption">
-	              <span class="caption-subject font-green-sharp bold uppercase">'.$langs->trans("SupportTickets").'</span>
+	              <span class="caption-subject font-green-sharp bold uppercase">' . $langs->trans("SupportTickets") . '</span>
 	            </div>
 	          </div>';
 
-			$nboftickets = 0;
-			$nbofopentickets = 0;
+	$nboftickets = 0;
+	$nbofopentickets = 0;
 
-			print '
+	print '
 	          <div class="portlet-body">
 
 	            <div class="row">
 	              <div class="col-md-9">
-					'.$langs->trans("NbOfTickets").'
+					' . $langs->trans("NbOfTickets") . '
 	              </div>
 	              <div class="col-md-3 right"><h2>
-	                '.$nboftickets.'
+	                ' . $nboftickets . '
 	              </h2></div>
 	            </div> <!-- END ROW -->
 
 	            <div class="row">
 	              <div class="col-md-9">
-					'.$langs->trans("NbOfOpenTickets").'
+					' . $langs->trans("NbOfOpenTickets") . '
 	              </div>
 	              <div class="col-md-3 right"><h2>';
-					if ($nbofopentickets > 0) print '<font style="color: orange;">';
-					print $nbofopentickets;
-					if ($nbofopentickets > 0) print '</font>';
-	                print '</h2>
+	if ($nbofopentickets > 0) print '<font style="color: orange;">';
+	print $nbofopentickets;
+	if ($nbofopentickets > 0) print '</font>';
+	print '</h2>
 	              </div>
 	            </div> <!-- END ROW -->
 
 				<div class="row">
 				<div class="center col-md-12">
 					<br>
-					<a class="wordbreak" href="'.$_SERVER["PHP_SELF"].'?mode=support" class="btn default btn-xs green-stripe">
-	            	'.$langs->trans("SeeDetailsOfTickets").'
+					<a class="wordbreak" href="' . $_SERVER["PHP_SELF"] . '?mode=support" class="btn default btn-xs green-stripe">
+	            	' . $langs->trans("SeeDetailsOfTickets") . '
 	                </a>
 				</div></div>
 
@@ -3456,7 +3459,9 @@ if ($mode == 'dashboard')
 
 	        </div> <!-- END PORTLET -->
 	      </div><!-- END COL -->
-
+	      ';
+}
+print '
 	    </div> <!-- END ROW -->
 	';
 
@@ -5614,7 +5619,7 @@ if ($mode == 'registerpaymentmode')
 		<div class="radio inline-block"><span>'.$langs->trans("PayPal").'<input type="radio" name="type" value="PayPal"></span></div><br>
 		<img src="/img/paypal.png" width="50" height="31">
 		</label>
-		
+
 		<label class="radio-inline" id="linksepa" style="margin-left: 30px;">
 		<div class="radio inline-block"><span>'.$langs->trans("SEPAMandate").'<input type="radio" name="type" value="SepaMandate"></span></div><br>
 		<img src="/img/sepa.png" width="50" height="31">
@@ -6546,7 +6551,7 @@ if ($mode == 'mycustomerbilling')
 
 
 
-if ($mode == 'support')
+if ($mode == 'support' && !empty($conf->global->SELLYOURSAAS_ENABLE_SUPPORT))
 {
 	// Print warning to read FAQ before
 	print '<!-- Message to read FAQ and get status -->'."\n";
