@@ -637,7 +637,7 @@ class modSellYourSaas extends DolibarrModules
 		$resultx=$extrafields->addExtraField('username_db',                           "Username DB",  'varchar', 126,  '32',    'contrat', 1, 0,    '',      '', 1, '', -1, 0, '', '', 'sellyoursaas@sellyoursaas', '$conf->sellyoursaas->enabled');
 		$resultx=$extrafields->addExtraField('password_db',                           "Password DB",  'varchar', 127,  '64',    'contrat', 0, 0,    '',      '', 1, '', -1, 0, '', '', 'sellyoursaas@sellyoursaas', '$conf->sellyoursaas->enabled');
 		$resultx=$extrafields->addExtraField('prefix_db',                 "Special table prefix DB",  'varchar', 128,  '64',    'contrat', 0, 0,    '',      '', 1, '', -1, 0, '', '', 'sellyoursaas@sellyoursaas', '$conf->sellyoursaas->enabled');
-		$resultx=$extrafields->addExtraField('timezone',                                 "TimeZone",  'varchar', 129,  '64',    'contrat', 0, 0,    '',      '', 1, '', -1, 0, '', '', 'sellyoursaas@sellyoursaas', '$conf->sellyoursaas->enabled');
+		$resultx=$extrafields->addExtraField('timezone',                                 "TimeZone",  'varchar', 129,  '64',    'contrat', 0, 0,    '',      '', 1, '', -1, 0, '', '', 'sellyoursaas@sellyoursaas', '$conf->sellyoursaas->enabled', 'SellYourSaasTimeZoneDesc');
 		$resultx=$extrafields->addExtraField('fileauthorizekey',             "DateFileauthorizekey", 'datetime', 130,    '',    'contrat', 0, 0,    '',      '', 1, '', -1, 0, '', '', 'sellyoursaas@sellyoursaas', '$conf->sellyoursaas->enabled');
 		$resultx=$extrafields->addExtraField('filelock',                             "DateFilelock", 'datetime', 131,    '',    'contrat', 0, 0,    '',      '', 1, '', -1, 0, '', '', 'sellyoursaas@sellyoursaas', '$conf->sellyoursaas->enabled');
 		$resultx=$extrafields->addExtraField('latestresupdate_date',          "LatestResUpdateDate", 'datetime', 135,    '',    'contrat', 0, 0,    '',      '', 1, '', -1, 0, '', '', 'sellyoursaas@sellyoursaas', '$conf->sellyoursaas->enabled');
@@ -649,11 +649,11 @@ class modSellYourSaas extends DolibarrModules
 
 		// Invoice
 		$param=array('options'=>array(1=>1));
-		$resultx=$extrafields->addExtraField('separatorinvoice',        "SELLYOURSAAS_NAME", 'separate', 10,    '', 'facture', 0, 0, '', $param, 1, '',  1, 0, '', '', 'sellyoursaas@sellyoursaas', '$conf->sellyoursaas->enabled');
-		$resultx=$extrafields->addExtraField('commission',"PartnerCommissionForThisInvoice",      'int', 20,   '3', 'facture', 0, 0, '',     '', 1, '',  1, 0, '', '', 'sellyoursaas@sellyoursaas', '$conf->sellyoursaas->enabled');
+		$resultx=$extrafields->addExtraField('separatorinvoice',        "SELLYOURSAAS_NAME", 'separate', 1000,    '', 'facture', 0, 0, '', $param, 1, '',  1, 0, '', '', 'sellyoursaas@sellyoursaas', '$conf->sellyoursaas->enabled');
+		$resultx=$extrafields->addExtraField('commission',"PartnerCommissionForThisInvoice",      'int', 1020,   '3', 'facture', 0, 0, '',     '', 1, '',  1, 0, '', '', 'sellyoursaas@sellyoursaas', '$conf->sellyoursaas->enabled');
 		$param=array('options'=>array('Societe:societe/class/societe.class.php'=>null));
-		$resultx=$extrafields->addExtraField('reseller',                         "Reseller",     'link', 30,   '3', 'facture', 0, 0, '', $param, 1, '',  1, 0, '', '', 'sellyoursaas@sellyoursaas', '$conf->sellyoursaas->enabled');
-		$resultx=$extrafields->addExtraField('delayautopayment',    "DelayAutomaticPayment",     'date', 35,    '', 'facture', 0, 0, '',     '', 1, '', -1, 0, '', '', 'sellyoursaas@sellyoursaas', '$conf->sellyoursaas->enabled', 'DelayAutomaticPaymentDesc');
+		$resultx=$extrafields->addExtraField('reseller',                         "Reseller",     'link', 1030,   '3', 'facture', 0, 0, '', $param, 1, '',  1, 0, '', '', 'sellyoursaas@sellyoursaas', '$conf->sellyoursaas->enabled');
+		$resultx=$extrafields->addExtraField('delayautopayment',    "DelayAutomaticPayment",     'date', 1035,    '', 'facture', 0, 0, '',     '', 1, '', -1, 0, '', '', 'sellyoursaas@sellyoursaas', '$conf->sellyoursaas->enabled', 'DelayAutomaticPaymentDesc');
 
 		// Create/import website called 'sellyoursaas'
 		//include_once DOL_DOCUMENT_ROOT.'/website/class/website.class.php';
