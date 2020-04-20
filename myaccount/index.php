@@ -5614,7 +5614,7 @@ if ($mode == 'registerpaymentmode')
 		<div class="radio inline-block"><span>'.$langs->trans("PayPal").'<input type="radio" name="type" value="PayPal"></span></div><br>
 		<img src="/img/paypal.png" width="50" height="31">
 		</label>
-		
+
 		<label class="radio-inline" id="linksepa" style="margin-left: 30px;">
 		<div class="radio inline-block"><span>'.$langs->trans("SEPAMandate").'<input type="radio" name="type" value="SepaMandate"></span></div><br>
 		<img src="/img/sepa.png" width="50" height="31">
@@ -7059,7 +7059,7 @@ if ($mode == 'myaccount')
 					<br>
                   <input type="text" class="input-small quatrevingtpercent hideifnonassuj" value="'.$mythirdpartyaccount->tva_intra.'" name="vatnumber" placeholder="'.$placeholderforvat.'">
                     ';
-					if (empty($conf->global->MAIN_DISABLEVATCHECK) && isInEEC($mythirdpartyaccount) && (GETPOST('admin','alpha')))
+					if (empty($conf->global->MAIN_DISABLEVATCHECK) && $mythirdpartyaccount->isInEEC() && (GETPOST('admin','alpha')))
 					{
 					    if (! empty($conf->use_javascript_ajax))
 					    {
